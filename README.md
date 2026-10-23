@@ -6,8 +6,9 @@ Your sessions are still on disk. `claude-move` copies the list over to the accou
 [中文说明](#中文)
 
 > Unofficial. Not affiliated with or endorsed by Anthropic. It depends on the desktop app's
-> on-disk layout, which may change in any release. macOS and Windows (Windows support is new: its
-> tests run on Windows in CI, but it has not been tried by hand on a real desktop app yet; see [Windows](#windows)).
+> on-disk layout, which may change in any release. macOS and Windows (Windows support is new: its tests run on
+> Windows in CI, and finding, closing and reopening the desktop app was tried on Windows 11, but a full move has not
+> been yet; see [Windows](#windows)).
 
 ## Why the list looks empty
 
@@ -51,13 +52,15 @@ py $HOME\claude-move.py app install     # a "Claude Move" shortcut in the Start 
 Open Claude Move from the Start menu to get the panel; everything below works from there. On the command line,
 write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is different on Windows:
 
-- The desktop app's data is in `%APPDATA%\Claude`, or for the Microsoft Store version in
-  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`; claude-move uses whichever has the newest session list.
+- The desktop app's data is in `%APPDATA%\Claude` (the Microsoft Store version too). If a Store version keeps a copy in
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`, claude-move uses whichever has the newest session list.
 - Commands to copy are for PowerShell: `$env:CLAUDE_CONFIG_DIR='C:\Users\you\.claude-work'; claude`.
 - "Open in Terminal" opens a console window (Windows Terminal when it is your default) that stays open after `claude`
   ends.
-- The panel's move button asks the desktop app to close and ends it if it only went to the notification area, then
-  starts it again from the Start menu entry.
+- The desktop app's ✕ only hides it in the notification area, and nothing outside the app can ask it to quit, so the
+  panel's move button ends its processes (anything running in its Code tab stops, as when you quit it), then starts
+  it again from the Start menu entry. On the command line, quit it yourself: right-click its icon in the notification
+  area, then Quit.
 - Notifications are Windows toasts.
 - `app install` makes a Start menu shortcut (and one on the desktop unless `--no-dock`) instead of `Claude Move.app`;
   `--icon` takes a PNG or ICO.
@@ -199,7 +202,7 @@ is missing.
 python3 -m unittest discover tests
 ```
 
-GitHub Actions runs them on Windows (Python 3.9 and 3.13) and macOS for every push.
+GitHub Actions runs them on Windows (Python 3.9 and 3.14) and macOS for every push.
 
 ## License
 
@@ -211,7 +214,7 @@ MIT
 
 Claude 桌面 App 换了账号登录以后，Code 页左边的会话列表空了？会话其实都还在本机，`claude-move` 把列表搬到你现在用的账号下。
 
-> 非官方工具，和 Anthropic 没有关系。它依赖桌面 App 在磁盘上的存放方式，App 更新后可能失效。支持 macOS 和 Windows（Windows 是新加的：测试在 GitHub 的 Windows 机器上跑过，但还没在装了桌面 App 的真机上手动试过）。
+> 非官方工具，和 Anthropic 没有关系。它依赖桌面 App 在磁盘上的存放方式，App 更新后可能失效。支持 macOS 和 Windows（Windows 是新加的：测试在 GitHub 的 Windows 机器上跑过；在 Windows 11 真机上试过找到、关掉、重新打开桌面 App，完整搬一次还没试过）。
 
 **Windows：** 先从 python.org 装 Python 3.9 以上（或 `winget install Python.Python.3.13`），然后在 PowerShell 里：
 
@@ -221,10 +224,10 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 ```
 
 从开始菜单打开 Claude Move 就是面板，下面说的事都能在面板上点。命令行里把本文的 `claude-move` 换成 `py $HOME\claude-move.py`。和 Mac 不一样的地方：
-- 桌面 App 的数据在 `%APPDATA%\Claude`，微软商店版在 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`，claude-move 用会话列表最新的那个。
+- 桌面 App 的数据在 `%APPDATA%\Claude`（微软商店版也是）。如果商店版在 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` 也有一份，claude-move 用会话列表最新的那个。
 - 复制的命令是 PowerShell 写法：`$env:CLAUDE_CONFIG_DIR='C:\Users\你\.claude-work'; claude`。
 - “打开终端”开的是命令行窗口（默认终端是 Windows Terminal 就用它），`claude` 退出后窗口不关。
-- 面板的搬家按钮会先请桌面 App 关闭，如果它只是缩到通知区域就结束它，搬完再从开始菜单的入口打开它。
+- 桌面 App 点 ✕ 只是缩到通知区域，外面也没办法请它退出，所以面板的搬家按钮会直接结束它的进程（Code 页里正在跑的会停下，跟退出 App 一样），搬完再从开始菜单的入口打开它。用命令行的话自己退出：右键通知区域里的 Claude 图标 → 退出。
 - 通知是 Windows 的系统通知。
 - `app install` 生成开始菜单快捷方式（不加 `--no-dock` 时桌面上也放一个），不是 `Claude Move.app`；`--icon` 用 PNG 或 ICO。
 

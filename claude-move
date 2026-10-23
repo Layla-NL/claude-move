@@ -45,8 +45,8 @@ HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
 
 
 def desktop_dir():
-    """The desktop app's own data folder. On Windows the installer build uses %APPDATA%/Claude and the Store
-    (MSIX) build a redirected copy under %LOCALAPPDATA%/Packages; the one with the newest session list wins."""
+    """The desktop app's own data folder. On Windows it is %APPDATA%/Claude (the Store build too, as of 3.6556), but
+    a Store build may get a redirected copy under %LOCALAPPDATA%/Packages; the one with the newest session list wins."""
     if not WIN:
         return HOME / "Library/Application Support/Claude"
     roaming = Path(os.environ.get("APPDATA") or HOME / "AppData/Roaming") / "Claude"
@@ -345,6 +345,10 @@ TW = {
     "d_no_cli": ("{a} has desktop sessions but no CLI login, so Open in Terminal and run cannot use it. In PowerShell: $env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-{n}\"; claude, then /login",
                  "{a} 有桌面会话，但没有命令行登录，打开终端和自动续接都用不了它。在 PowerShell 里：$env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-{n}\"; claude，再输入 /login"),
     "d_app_ok": ("Claude Move shortcut: installed", "Claude Move 快捷方式：已安装"),
+    "p_confirm": ("Close the desktop app now (anything running in its Code tab stops) and move the sessions to {a}?",
+                  "现在关掉桌面 App（它 Code 页里正在跑的会停下），把会话搬到 {a}？"),
+    "pt_move_confirm": ("The desktop app has to be closed while moving (anything running in its Code tab stops): close it now, move, and reopen it?",
+                        "搬的时候桌面 App 要关着（它 Code 页里正在跑的会停下）：现在关掉、搬完再重新打开？"),
     "u_notes": ("Use is priced at API list prices only to compare accounts; it counts Claude Code on this computer, not claude.ai chat or other devices.",
                 "用量按 API 价折算，只用来比较几个号谁用得多；只算这台电脑上的 Claude Code，网页聊天和别的设备上的用量算不进来。"),
 }
@@ -1546,15 +1550,10 @@ def quit_app():
     if cmd:
         subprocess.run(cmd, shell=True)
     elif WIN:
-        # ask it to close like the window's close button would, then end it if it only went to the tray
+        # nothing outside it can ask it to quit: its close button and a plain taskkill only hide it in the
+        # notification area (tried on Windows 11, Store build), so end its process tree as its tray Quit would
         mains, procs = app_pids()
         APP_EXE[:] = [procs[pid][1] for pid in mains][:1]
-        for pid in mains:
-            subprocess.run(["taskkill", "/PID", str(pid), "/T"], capture_output=True, creationflags=NO_WINDOW)
-        for _ in range(20):
-            if not app_running():
-                return True
-            time.sleep(0.5)
         for pid in mains:
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, creationflags=NO_WINDOW)
     else:
