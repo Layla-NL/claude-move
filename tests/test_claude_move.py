@@ -103,12 +103,12 @@ class ClaudeMove(unittest.TestCase):
         write(self.b / "local_1.json", sessionId="local_1", title="newer there", lastActivityAt=NOW)
         r = self.run_tool("to", "bbbb")
         self.assertIn("skip", r.stdout)
-        self.assertEqual(json.loads((self.b / "local_1.json").read_text())["title"], "newer there")
+        self.assertEqual(json.loads((self.b / "local_1.json").read_text(encoding="utf-8"))["title"], "newer there")
 
     def test_archived_target_copy_is_replaced(self):
         write(self.b / "local_1.json", sessionId="local_1", title="stale", lastActivityAt=NOW, isArchived=True)
         self.run_tool("to", "bbbb")
-        self.assertEqual(json.loads((self.b / "local_1.json").read_text())["title"], "recent")
+        self.assertEqual(json.loads((self.b / "local_1.json").read_text(encoding="utf-8"))["title"], "recent")
 
     def test_labels(self):
         self.assertEqual(self.run_tool("name", "bbbb", "work").returncode, 0)
@@ -136,11 +136,11 @@ class ClaudeMove(unittest.TestCase):
         write(self.b / "local_9.json", sessionId="local_9", title="theirs", lastActivityAt=NOW - 5)
         write(self.a / "local_9.json", sessionId="local_9", title="mine", lastActivityAt=NOW)
         self.run_tool("to", "bbbb")
-        self.assertEqual(json.loads((self.b / "local_9.json").read_text())["title"], "mine")
+        self.assertEqual(json.loads((self.b / "local_9.json").read_text(encoding="utf-8"))["title"], "mine")
         self.assertTrue((self.b / "local_1.json").exists())
         r = self.run_tool("undo")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads((self.b / "local_9.json").read_text())["title"], "theirs")
+        self.assertEqual(json.loads((self.b / "local_9.json").read_text(encoding="utf-8"))["title"], "theirs")
         self.assertFalse((self.b / "local_1.json").exists())
         self.assertTrue((self.a / "local_1.json").exists(), "source untouched")
         self.assertIn("No backups", self.run_tool("undo").stderr, "the same move is not undone twice")
@@ -164,7 +164,7 @@ class ClaudeMove(unittest.TestCase):
         (dest / "s1.jsonl").write_text("kept")
         r = self.run_tool("import-cli", "--config", str(other), "--project=-work-app")
         self.assertIn("already there", r.stdout)
-        self.assertEqual((dest / "s1.jsonl").read_text(), "kept", "never overwrites")
+        self.assertEqual((dest / "s1.jsonl").read_text(encoding="utf-8"), "kept", "never overwrites")
 
     def test_import_cli_project_path_is_encoded(self):
         other = self.home / "other"
@@ -263,7 +263,7 @@ class Usage(unittest.TestCase):
     def test_html_panel(self):
         r = self.run_tool("usage", "--html", "--no-open")
         self.assertEqual(r.returncode, 0, r.stderr)
-        page = (self.home / ".config/claude-move/usage.html").read_text()
+        page = (self.home / ".config/claude-move/usage.html").read_text(encoding="utf-8")
         self.assertIn("<!doctype html>", page)
         self.assertIn("prefers-color-scheme:dark", page)
 
@@ -274,18 +274,18 @@ class Usage(unittest.TestCase):
         (cfg / "settings.json").write_text(json.dumps({"theme": "dark", "statusLine": {"type": "command", "command": "echo old"}}))
         r = self.run_tool("watch", "install", CLAUDE_CONFIG_DIR=str(cfg))
         self.assertEqual(r.returncode, 0, r.stderr)
-        cmd = json.loads((cfg / "settings.json").read_text())["statusLine"]["command"]
+        cmd = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))["statusLine"]["command"]
         self.assertIn("watch record", cmd)
         payload = json.dumps({"rate_limits": {"five_hour": {"used_percentage": 23.5, "resets_at": 1},
                                               "seven_day": {"used_percentage": 41.2, "resets_at": 2}}})
         r = self.run_tool("watch", "record", stdin=payload, CLAUDE_CONFIG_DIR=str(cfg))
         self.assertEqual(r.stdout.strip(), "old")  # the previous status line still shows
-        saved = json.loads((self.home / ".config/claude-move/limits.json").read_text())
+        saved = json.loads((self.home / ".config/claude-move/limits.json").read_text(encoding="utf-8"))
         self.assertEqual([(r["kind"], r["percent"]) for r in saved[self.b]["rows"]], [("weekly_all", 41.2), ("session", 23.5)])
         r = self.run_tool("usage")
         self.assertIn("official: week 41% · 5h 24%", r.stdout)
         self.run_tool("watch", "uninstall", CLAUDE_CONFIG_DIR=str(cfg))
-        s = json.loads((cfg / "settings.json").read_text())
+        s = json.loads((cfg / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(s["statusLine"]["command"], "echo old")
         self.assertEqual(s["theme"], "dark")
 
@@ -320,7 +320,7 @@ class Usage(unittest.TestCase):
         self.assertIn("official: week 41% · week · Opus 12% · 5h 100%", line)
         page_r = self.run_tool("usage", "--html", "--no-open")
         self.assertEqual(page_r.returncode, 0, page_r.stderr)
-        self.assertIn("week · Opus", (self.home / ".config/claude-move/usage.html").read_text())
+        self.assertIn("week · Opus", (self.home / ".config/claude-move/usage.html").read_text(encoding="utf-8"))
 
 
     @unittest.skipIf(WIN, "checks the sh script; test_windows_scripts covers the .cmd one")
@@ -334,7 +334,7 @@ class Usage(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("CLAUDE_CONFIG_DIR=~/.claude-second claude", r.stdout)
         script = self.home / ".config/claude-move/term/claude-second.command"
-        self.assertEqual(script.read_text().splitlines()[2:], [f"export CLAUDE_CONFIG_DIR={c}", "exec /opt/x/claude"])
+        self.assertEqual(script.read_text(encoding="utf-8").splitlines()[2:], [f"export CLAUDE_CONFIG_DIR={c}", "exec /opt/x/claude"])
         self.assertTrue(os.access(script, os.X_OK))
         # the CLI folder's newest transcript names the project (inside a worktree), so the window starts there
         proj = self.home / "app"
@@ -345,7 +345,7 @@ class Usage(unittest.TestCase):
         r = self.run_tool("term", "second", "--rc", CLAUDE_MOVE_TERM_CMD=NOOP, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("--remote-control second", r.stdout)
-        lines = (self.home / ".config/claude-move/term/claude-second-rc.command").read_text().splitlines()
+        lines = (self.home / ".config/claude-move/term/claude-second-rc.command").read_text(encoding="utf-8").splitlines()
         self.assertEqual(lines[1], f"cd {proj} 2>/dev/null || cd ~ || exit 1")
         self.assertEqual(lines[3], "exec /opt/x/claude --remote-control second")
         r = self.run_tool("term", "aaaa", CLAUDE_MOVE_TERM_CMD=NOOP)  # has sessions, but no CLI login
@@ -402,7 +402,7 @@ class Panel(unittest.TestCase):
         (self.root / c / "org").mkdir(parents=True)
         log = self.log
         stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.now - 10))
-        log.write_text(log.read_text() + f"{stamp} [info] [oauth-v2] lookup orgId=x cacheKey=acct:{c}|y:x:https:/\n")
+        log.write_text(log.read_text(encoding="utf-8") + f"{stamp} [info] [oauth-v2] lookup orgId=x cacheKey=acct:{c}|y:x:https:/\n")
         self.start()
         self.assertEqual(self.call("/state", token=False)[0], 403)
         self.assertEqual(self.call("/state", host="evil.example:80")[0], 403)
@@ -438,12 +438,12 @@ class Panel(unittest.TestCase):
         code, body = self.call("/terminal", {"acct": self.b})
         self.assertEqual(code, 200, body)
         self.assertTrue((self.home / "term").exists())
-        self.assertIn(f"CLAUDE_CONFIG_DIR={c}", (self.home / f".config/claude-move/term/claude-second{SCRIPT}").read_text())
+        self.assertIn(f"CLAUDE_CONFIG_DIR={c}", (self.home / f".config/claude-move/term/claude-second{SCRIPT}").read_text(encoding="utf-8"))
         self.assertEqual(self.call("/terminal", {"acct": self.b, "rc": True})[0], 200)
-        self.assertIn("--remote-control bbbbbbbb", (self.home / f".config/claude-move/term/claude-second-rc{SCRIPT}").read_text())
+        self.assertIn("--remote-control bbbbbbbb", (self.home / f".config/claude-move/term/claude-second-rc{SCRIPT}").read_text(encoding="utf-8"))
         self.assertIn('id="auto"', page)
         self.assertEqual(self.call("/terminal", {"acct": self.b, "auto": True})[0], 200)
-        auto = (self.home / f".config/claude-move/term/claude-second-auto{SCRIPT}").read_text()
+        auto = (self.home / f".config/claude-move/term/claude-second-auto{SCRIPT}").read_text(encoding="utf-8")
         self.assertIn(f"run --config {c} {self.b}", auto)
 
     def test_panel_tools(self):
@@ -464,7 +464,7 @@ class Panel(unittest.TestCase):
         self.assertTrue(api("name", {"acct": self.a, "label": "work"})["ok"])
         self.assertFalse(api("name", {"acct": self.a, "label": "x" * 40})["ok"])
         self.assertEqual(self.call("/api/name", {"acct": "nope", "label": "x"})[0], 400)
-        self.assertEqual(json.loads((self.home / ".config/claude-move/accounts.json").read_text())[self.a], "work")
+        self.assertEqual(json.loads((self.home / ".config/claude-move/accounts.json").read_text(encoding="utf-8"))[self.a], "work")
         # move: preview, then the ticked session only, then undo it
         self.assertEqual([s["id"] for s in api("sessions?acct=" + self.a)["sessions"]], ["local_1"])
         r = api("move", {"from": self.a, "to": self.b, "range": "all", "dry": True})
@@ -479,18 +479,18 @@ class Panel(unittest.TestCase):
         self.assertTrue(api("backups")["backups"][0]["undone"])
         # status line recorder on and off in that login's own settings.json
         self.assertTrue(api("watch", {"acct": self.b, "on": True})["ok"])
-        self.assertIn("watch record", json.loads((c / "settings.json").read_text())["statusLine"]["command"])
+        self.assertIn("watch record", json.loads((c / "settings.json").read_text(encoding="utf-8"))["statusLine"]["command"])
         api("watch", {"acct": self.b, "on": False})
-        self.assertNotIn("statusLine", json.loads((c / "settings.json").read_text()))
+        self.assertNotIn("statusLine", json.loads((c / "settings.json").read_text(encoding="utf-8")))
         self.assertEqual(self.call("/api/watch", {"acct": self.a, "on": True})[0], 400)  # no CLI login
         # add a CLI login: the official sign-in in a Terminal window; the new account is named once it shows up
         self.assertFalse(api("login", {"name": "a b"})["ok"])
         self.assertTrue(api("login", {"name": "new"})["ok"])
-        self.assertIn("auth login --claudeai", (self.home / f".config/claude-move/term/login-claude-new{SCRIPT}").read_text())
+        self.assertIn("auth login --claudeai", (self.home / f".config/claude-move/term/login-claude-new{SCRIPT}").read_text(encoding="utf-8"))
         n = "dddddddd-0000-0000-0000-000000000004"
         (self.home / ".claude-new/.claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": n}}))
         self.call("/state")
-        self.assertEqual(json.loads((self.home / ".config/claude-move/accounts.json").read_text())[n], "new")
+        self.assertEqual(json.loads((self.home / ".config/claude-move/accounts.json").read_text(encoding="utf-8"))[n], "new")
         self.assertFalse(api("login", {"name": "new"})["ok"])  # already signed in
         # notifications
         self.assertFalse(api("notify", {"on": True, "levels": "80,200"})["ok"])
@@ -537,7 +537,14 @@ class Panel(unittest.TestCase):
         rows = cm.parse_usage_report(json.dumps(msg))
         self.assertEqual([(r["kind"], r["percent"], r["scope"]) for r in rows],
                          [("session", 7.0, None), ("weekly_all", 96.0, None), ("weekly_scoped", 0.0, "Fable")])
-        self.assertEqual(time.strftime("%m-%d %H:%M", time.gmtime(rows[1]["resets_at"])), "10-27 02:00")
+        self.assertEqual(time.gmtime(rows[0]["resets_at"]).tm_hour, 15)
+        try:
+            from zoneinfo import ZoneInfo
+            zones = bool(ZoneInfo("Asia/Singapore"))
+        except Exception:  # no zone database (Windows without tzdata): read as local time, the zone the CLI uses
+            zones = False
+        when = (time.gmtime if zones else time.localtime)(rows[1]["resets_at"])
+        self.assertEqual(time.strftime("%m-%d %H:%M", when), "10-27 02:00" if zones else "10-27 10:00")
 
 
 class PanelLifecycle(unittest.TestCase):
@@ -566,7 +573,7 @@ class PanelLifecycle(unittest.TestCase):
                            capture_output=True, text=True, env=self.env())
         self.assertEqual(r.returncode, 0, r.stderr)
         app = self.home / "Apps" / "Claude Move.app"
-        launch = (app / "Contents/Resources/launch.sh").read_text()
+        launch = (app / "Contents/Resources/launch.sh").read_text(encoding="utf-8")
         self.assertIn("panel --here --idle 1800", launch)
         self.assertTrue((app / "Contents/Resources/applet.icns").stat().st_size > 1000)
         self.assertFalse((app / "Contents/Resources/Assets.car").exists())
@@ -619,9 +626,9 @@ f.write('{{"type":"user","b":1}}\\n'); f.close()
         sid = args[args.index("--resume") + 1]
         self.assertEqual(args[args.index("--remote-control") + 1], "second")
         self.assertIn("Continue where you left off", args[-1])
-        moved = (b_cfg / "projects/-p" / f"{sid}.jsonl").read_text().splitlines()
+        moved = (b_cfg / "projects/-p" / f"{sid}.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(moved), 3)  # first's two lines, then second's own
-        self.assertEqual(len((a_cfg / "projects/-p" / f"{sid}.jsonl").read_text().splitlines()), 2)  # source untouched
+        self.assertEqual(len((a_cfg / "projects/-p" / f"{sid}.jsonl").read_text(encoding="utf-8").splitlines()), 2)  # source untouched
         self.assertIn("first hit its limit; the session moved to second", sent.read_text(encoding="utf-8"))
 
     def test_run_stays_when_no_other_account(self):
