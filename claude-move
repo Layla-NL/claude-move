@@ -15,7 +15,9 @@ Usage:
   claude-move list
   claude-move sessions <account>
   claude-move name <account> <label>
-  claude-move to <target> [--from <source>] [--days N] [--all] [--dry-run]
+  claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]
+  claude-move undo [--list] [--backup NAME] [--dry-run]
+  claude-move import-cli [--config DIR] [--project PATH] [--session ID ...] [--days N] [--dry-run]
 <account> is a label you gave with `name`, or the first characters of the account id.
 """
 import argparse
@@ -28,12 +30,14 @@ import sys
 import time
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
 ROOT = Path(os.environ.get("CLAUDE_MOVE_ROOT", str(HOME / "Library/Application Support/Claude/claude-code-sessions")))
 BACKUPS = Path(os.environ.get("CLAUDE_MOVE_BACKUPS", str(ROOT.parent / "claude-code-sessions-backups")))
 NAMES = Path(os.environ.get("CLAUDE_MOVE_NAMES", str(HOME / ".config/claude-move/accounts.json")))
+DESKTOP_HOME = Path(os.environ.get("CLAUDE_MOVE_DESKTOP_CONFIG", str(HOME / ".claude")))
+MANIFEST = ".claude-move.json"
 
 
 def _zh():
@@ -74,6 +78,23 @@ T = {
     "running": ("Quit the Claude desktop app completely first (Claude menu -> Quit), then run this again.",
                 "请先完全退出桌面 App（菜单 Claude → 退出），再运行。"),
     "backed": ("Target's previous list backed up to: {p}", "目标账号原来的列表已备份到：{p}"),
+    "artifacts": ("These sessions published artifacts. They stay with the account that created them: another account can open one only if it is shared, and cannot edit it:",
+                  "这些会话发布过 artifact。它们归创建它的那个账号：别的账号要分享才打得开，也改不了："),
+    "art_line": ("  - {t}: {u}", "  - {t}：{u}"),
+    "no_backups": ("No backups yet.", "还没有备份。"),
+    "bk_line": ("{n}  {w}  {c} file(s) into {a}", "{n}  {w}  {c} 个文件，搬进 {a}"),
+    "bk_old": ("{n}  (made by an older version; cannot be undone automatically)", "{n}（旧版本留下的，不能自动撤回）"),
+    "undo_plan": ("Undo {n}: restore {r}, remove {d} added file(s) in {a}", "撤回 {n}：放回 {r} 个，删掉当时新增的 {d} 个，位置 {a}"),
+    "undo_done": ("Undone. The state just before the undo was saved as {p}.", "撤回好了。撤回前的样子另存为 {p}。"),
+    "undo_gone": ("The backup's target folder no longer exists: {p}", "备份对应的目标目录已经不在了：{p}"),
+    "no_cfg": ("Config folder not found: {p}", "没找到配置目录：{p}"),
+    "no_proj": ("No sessions for {p} under {c}.", "{c} 下面没有 {p} 的会话。"),
+    "imp_head": ("From {c} into {d}, project {p}:", "从 {c} 搬到 {d}，项目 {p}："),
+    "imp_add": ("  copy: {i}  [{w}]  {t}", "  复制：{i}  [{w}]  {t}"),
+    "imp_skip": ("  skip (already there): {i}  {t}", "  跳过（已经有了）：{i}  {t}"),
+    "imp_done": ("Copied {n}. In the desktop app, open the session from Claude Code's session history (or resume it by id).",
+                 "复制好了 {n} 个。在桌面 App 里从 Claude Code 的历史会话里打开它（或按 id 接着用）。"),
+    "same_cfg": ("Source and target config folders are the same.", "来源和目标是同一个配置目录。"),
     "done": ("Moved {n}. Reopen the desktop app. Transcripts in ~/.claude/projects were never touched.",
              "搬好了 {n} 个。现在重新打开桌面 App。会话的完整记录本来就在 ~/.claude/projects，不用动。"),
 }
@@ -197,6 +218,14 @@ def cmd_name(args):
     print(t("named", a=a["acct"][:8], n=args.label))
 
 
+def matches(d, only):
+    if not only:
+        return True
+    title = (d.get("title") or "").lower()
+    sid = d.get("sessionId") or ""
+    return any(o.lower() in title or sid.startswith(o) or sid.startswith("local_" + o) for o in only)
+
+
 def cmd_to(args):
     accts = accounts()
     if not accts:
@@ -211,8 +240,9 @@ def cmd_to(args):
         src = max(others, key=lambda a: a["last"])
     if src["dir"] == dst["dir"]:
         sys.exit(t("same"))
-    todo = active(src, args.days, args.all)
-    print(t("plan", s=show(src), d=show(dst), n=len(todo), w="" if args.all else t("window", d=f"{args.days:g}")))
+    todo = [(f, d) for f, d in active(src, args.days, args.all or bool(args.only)) if matches(d, args.only)]
+    print(t("plan", s=show(src), d=show(dst), n=len(todo),
+            w="" if (args.all or args.only) else t("window", d=f"{args.days:g}")))
     plan = []
     for f, d in sorted(todo, key=lambda x: x[1].get("lastActivityAt") or 0, reverse=True):
         target = dst["dir"] / f.name
@@ -221,8 +251,17 @@ def cmd_to(args):
         if isinstance(old, dict) and (old.get("lastActivityAt") or 0) > (d.get("lastActivityAt") or 0) and not old.get("isArchived"):
             print(t("skip", t=title))
             continue
-        plan.append((f, target))
+        plan.append((f, target, d))
         print(t("over" if old else "add", t=title, w=when(d.get("lastActivityAt"))))
+    arts = []
+    for _, _, d in plan:
+        for a in d.get("publishedArtifacts") or []:
+            if isinstance(a, dict) and a.get("url"):
+                arts.append((a.get("title") or a["url"], a["url"]))
+    if arts:
+        print(t("artifacts"))
+        for title, url in dict.fromkeys(arts):
+            print(t("art_line", t=title, u=url))
     if args.dry_run:
         print(t("dry"))
         return
@@ -234,10 +273,136 @@ def cmd_to(args):
     BACKUPS.mkdir(parents=True, exist_ok=True)
     bk = BACKUPS / f"{time.strftime('%Y%m%d-%H%M%S')}-{dst['acct'][:8]}"
     shutil.copytree(dst["dir"], bk)
+    manifest = {"version": 1, "target": str(dst["dir"]), "account": dst["acct"], "created": int(time.time()),
+                "replaced": [tg.name for _, tg, _ in plan if tg.exists()],
+                "added": [tg.name for _, tg, _ in plan if not tg.exists()]}
+    (bk / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
     print(t("backed", p=bk))
-    for f, target in plan:
+    for f, target, _ in plan:
         shutil.copy2(f, target)
     print(t("done", n=len(plan)))
+
+
+def backups():
+    if not BACKUPS.is_dir():
+        return []
+    out = []
+    for b in sorted(BACKUPS.iterdir(), reverse=True):
+        if b.is_dir():
+            out.append((b, load(b / MANIFEST)))
+    return out
+
+
+def cmd_undo(args):
+    items = backups()
+    if args.list:
+        if not items:
+            print(t("no_backups"))
+        for b, m in items:
+            if isinstance(m, dict) and m.get("version") == 1:
+                state = " (undone)" if m.get("undone") else ""
+                print(t("bk_line", n=b.name, w=time.strftime("%m-%d %H:%M", time.localtime(m.get("created", 0))),
+                        c=len(m.get("replaced", [])) + len(m.get("added", [])), a=m.get("account", "")[:8]) + state)
+            else:
+                print(t("bk_old", n=b.name))
+        return
+    if args.backup:
+        chosen = [(b, m) for b, m in items if b.name == args.backup]
+    else:
+        chosen = [(b, m) for b, m in items if isinstance(m, dict) and m.get("version") == 1 and not m.get("undone")][:1]
+    if not chosen or not isinstance(chosen[0][1], dict):
+        sys.exit(t("no_backups"))
+    bk, m = chosen[0]
+    target = Path(m["target"])
+    if not target.is_dir():
+        sys.exit(t("undo_gone", p=target))
+    replaced = [n for n in m.get("replaced", []) if (bk / n).exists()]
+    added = [n for n in m.get("added", []) if (target / n).exists()]
+    print(t("undo_plan", n=bk.name, r=len(replaced), d=len(added), a=m.get("account", "")[:8]))
+    if args.dry_run:
+        print(t("dry"))
+        return
+    if app_running():
+        sys.exit(t("running"))
+    snap = BACKUPS / f"{time.strftime('%Y%m%d-%H%M%S')}-{m.get('account', 'x')[:8]}-before-undo"
+    shutil.copytree(target, snap)
+    for n in replaced:
+        shutil.copy2(bk / n, target / n)
+    for n in added:
+        (target / n).unlink()
+    m["undone"] = int(time.time())
+    (bk / MANIFEST).write_text(json.dumps(m, indent=2) + "\n")
+    print(t("undo_done", p=snap))
+
+
+def project_dir_name(path):
+    return "".join(c if c.isalnum() or c == "-" else "-" for c in str(path))
+
+
+def first_prompt(jsonl):
+    try:
+        with open(jsonl, encoding="utf-8", errors="replace") as fh:
+            for i, line in enumerate(fh):
+                if i > 400:
+                    break
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") == "user" and not rec.get("isMeta"):
+                    c = (rec.get("message") or {}).get("content")
+                    if isinstance(c, list):
+                        c = " ".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+                    if isinstance(c, str) and c.strip() and not c.lstrip().startswith("<"):
+                        return " ".join(c.split())[:60]
+    except OSError:
+        pass
+    return ""
+
+
+def cmd_import_cli(args):
+    src_cfg = Path(os.path.expanduser(args.config))
+    dst_cfg = DESKTOP_HOME
+    if not (src_cfg / "projects").is_dir():
+        sys.exit(t("no_cfg", p=src_cfg))
+    if src_cfg.resolve() == dst_cfg.resolve():
+        sys.exit(t("same_cfg"))
+    proj = args.project or os.getcwd()
+    literal = "/" not in proj and (src_cfg / "projects" / proj).is_dir()
+    name = proj if literal else project_dir_name(os.path.abspath(os.path.expanduser(proj)))
+    sdir = src_cfg / "projects" / name
+    if not sdir.is_dir():
+        sys.exit(t("no_proj", p=name, c=src_cfg))
+    ddir = dst_cfg / "projects" / name
+    cutoff = time.time() - args.days * 86400
+    files = sorted(sdir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if args.session:
+        files = [f for f in files if any(f.stem.startswith(s) for s in args.session)]
+    else:
+        files = [f for f in files if f.stat().st_mtime >= cutoff]
+    print(t("imp_head", c=src_cfg, d=dst_cfg, p=name))
+    todo = []
+    for f in files:
+        title = first_prompt(f)
+        w = time.strftime("%m-%d %H:%M", time.localtime(f.stat().st_mtime))
+        if (ddir / f.name).exists():
+            print(t("imp_skip", i=f.stem, t=title))
+            continue
+        todo.append(f)
+        print(t("imp_add", i=f.stem, w=w, t=title))
+    if args.dry_run:
+        print(t("dry"))
+        return
+    if not todo:
+        print(t("nothing"))
+        return
+    ddir.mkdir(parents=True, exist_ok=True)
+    for f in todo:
+        shutil.copy2(f, ddir / f.name)
+        side = sdir / f.stem
+        if side.is_dir() and not (ddir / f.stem).exists():
+            shutil.copytree(side, ddir / f.stem)
+    print(t("imp_done", n=len(todo)))
 
 
 def main(argv=None):
@@ -258,8 +423,22 @@ def main(argv=None):
     to.add_argument("--from", dest="source", help="source account (default: the most recently used one)")
     to.add_argument("--days", type=float, default=3, help="only sessions used in the last N days (default 3)")
     to.add_argument("--all", action="store_true", help="every live session, regardless of age")
+    to.add_argument("--only", action="append", metavar="TEXT",
+                    help="only sessions whose title contains TEXT or whose id starts with it (repeatable)")
     to.add_argument("--dry-run", action="store_true", help="show what would be copied, change nothing")
     to.set_defaults(fn=cmd_to)
+    u = sub.add_parser("undo", help="put the target account's list back the way it was before the last move")
+    u.add_argument("--list", action="store_true", help="list backups")
+    u.add_argument("--backup", help="undo this backup instead of the latest one")
+    u.add_argument("--dry-run", action="store_true")
+    u.set_defaults(fn=cmd_undo)
+    ic = sub.add_parser("import-cli", help="copy CLI session transcripts from another config folder into ~/.claude")
+    ic.add_argument("--config", required=True, help="the other config folder, e.g. ~/.claude-work")
+    ic.add_argument("--project", help="project path (default: current folder) or its folder name under projects/")
+    ic.add_argument("--session", action="append", help="session id or id prefix (repeatable)")
+    ic.add_argument("--days", type=float, default=3, help="without --session: sessions touched in the last N days")
+    ic.add_argument("--dry-run", action="store_true")
+    ic.set_defaults(fn=cmd_import_cli)
     args = p.parse_args(argv)
     args.fn(args)
 

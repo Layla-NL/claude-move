@@ -52,7 +52,9 @@ Needs Python 3.9+ (the one macOS ships is fine). No dependencies.
 | `claude-move list` | Accounts on this Mac, live/archived session counts, which one was used last |
 | `claude-move sessions <account>` | Live sessions of one account |
 | `claude-move name <account> <label>` | Give an account a short label, e.g. `work`, `personal` |
-| `claude-move to <target> [--from <source>] [--days N] [--all] [--dry-run]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target |
+| `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them |
+| `claude-move undo [--list] [--backup NAME] [--dry-run]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too |
+| `claude-move import-cli --config DIR [--project PATH] [--session ID] [--days N] [--dry-run]` | Copy CLI session transcripts from another config folder (e.g. a second account under `CLAUDE_CONFIG_DIR=~/.claude-work`) into `~/.claude`, so the desktop app can open them. Never overwrites. A project folder name that starts with `-` needs `--project=-Users-me-app` |
 
 `<account>` is a label, or the first few characters of the account id shown by `list`.
 Labels are stored in `~/.config/claude-move/accounts.json`.
@@ -92,7 +94,11 @@ Claude 桌面 App 换了账号登录以后，Code 页左边的会话列表空了
 3. 运行 `claude-move to <新账号>`；
 4. 重新打开 App。
 
-**命令：** `list` 看有哪些账号；`sessions <账号>` 看某个账号的会话；`name <账号> <名字>` 起个好记的名字；`to <目标> [--from 来源] [--days N] [--all] [--dry-run]` 搬最近 N 天（默认 3 天）用过、没归档的会话。
+**命令：**
+- `list` 看有哪些账号；`sessions <账号>` 看某个账号的会话；`name <账号> <名字>` 起个好记的名字。
+- `to <目标> [--from 来源] [--days N] [--all] [--only 文字] [--dry-run]`：搬最近 N 天（默认 3 天）用过、没归档的会话；`--only` 按标题或 id 挑着搬。搬之前会列出这些会话发布过的 artifact，提醒它们还归创建它的账号。
+- `undo [--list] [--backup 名字] [--dry-run]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。
+- `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
 **不做的事：** 不搬 artifact、项目这类存在 claude.ai 上的东西（它们跟着创建它的账号走）；不碰命令行的配置目录和登录凭据；会话里点过的“这次允许”不会带过去。
 
