@@ -57,7 +57,7 @@ Needs Python 3.9+ (the one macOS ships is fine). No dependencies.
 | `claude-move usage [--refresh] [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % from the CLI. `--refresh` asks `/usage` of each signed-in CLI folder first; `--html` opens a panel page |
 | `claude-move panel` | The same panel in your browser, served on 127.0.0.1 only, with a button that moves your sessions after you switch accounts (see below) |
 | `claude-move app install [--icon IMAGE] [--no-dock]` | Make `~/Applications/Claude Move.app` and put it in the Dock: double-click it to open the panel, no Terminal needed |
-| `claude-move term <account>` | Open a Terminal window running Claude Code as that account, with its own CLI login folder (`CLAUDE_CONFIG_DIR=~/.claude-<name>`) |
+| `claude-move term <account> [--rc]` | Open a Terminal window running Claude Code as that account, with its own CLI login folder (`CLAUDE_CONFIG_DIR=~/.claude-<name>`), in the project folder that account used last. `--rc` starts it as a Remote Control session named after the account, so the Claude phone app signed into the same account can join |
 | `claude-move watch install` / `uninstall` | Record the official 5-hour/weekly % each time the CLI status line refreshes; keeps your existing status line |
 | `claude-move import-cli --config DIR [--project PATH] [--session ID] [--days N] [--dry-run]` | Copy CLI session transcripts from another config folder (e.g. a second account under `CLAUDE_CONFIG_DIR=~/.claude-work`) into `~/.claude`, so the desktop app can open them. Never overwrites. A project folder name that starts with `-` needs `--project=-Users-me-app` |
 
@@ -113,8 +113,9 @@ double-click brings back the running panel, and it stops by itself 30 minutes af
 inside a Claude Code session in the desktop app: quitting the app would stop that session too. The panel is served on 127.0.0.1 with a one-time token, so only this Mac can
 use it, and its buttons can only quit/reopen the app, move sessions, refresh the official %, and open Terminal.
 Each card with a CLI login has "Open in Terminal", which starts `claude` in a new Terminal window with that
-account's own config folder (the same as `claude-move term <account>`; nothing about the login is read), and can
-also copy that command (`CLAUDE_CONFIG_DIR=~/.claude-work claude`). When `~/.claude` and a `~/.claude-*` folder show
+account's own config folder, in the project folder it used last (the same as `claude-move term <account>`; nothing
+about the login is read), and "Open in Terminal, reachable from phone", which adds `--remote-control <label>`. Both
+commands can also be copied (`CLAUDE_CONFIG_DIR=~/.claude-work claude`). When `~/.claude` and a `~/.claude-*` folder show
 the same account, the `~/.claude-*` one is used.
 
 ## What it does not do
@@ -161,9 +162,9 @@ Claude 桌面 App 换了账号登录以后，Code 页左边的会话列表空了
 - `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
 - `usage [--refresh] [--html] [--config 目录]`：各账号额度面板；`--refresh` 先向每个命令行登录问官方 `/usage`，`--html` 打开网页版。
-- `panel`：在浏览器里打开带按钮的面板（只在本机 127.0.0.1 上）。换号时：先在桌面 App 里退出登录、登上新号、打开一次 Code 页，再回面板点“把 A 的会话搬到 B，并重开 App”。面板会先从 App 日志确认 App 现在登录的确实是 B，然后退出 App、照 `claude-move to B` 搬会话（先备份）、重新打开 App。登录这一步始终由你在 App 里自己点。请在“终端”里运行 `claude-move panel`，不要在桌面 App 的 Claude Code 会话里运行，因为退出 App 会连那个会话一起关掉。有命令行登录的号，卡片上有“打开终端”：弹出一个新终端窗口，用这个号自己的配置目录运行 `claude`（和 `claude-move term <账号>` 一样，不读登录信息）；也可以一键复制这条启动命令。`~/.claude` 和某个 `~/.claude-*` 显示的是同一个号时，用 `~/.claude-*` 那个。
+- `panel`：在浏览器里打开带按钮的面板（只在本机 127.0.0.1 上）。换号时：先在桌面 App 里退出登录、登上新号、打开一次 Code 页，再回面板点“把 A 的会话搬到 B，并重开 App”。面板会先从 App 日志确认 App 现在登录的确实是 B，然后退出 App、照 `claude-move to B` 搬会话（先备份）、重新打开 App。登录这一步始终由你在 App 里自己点。请在“终端”里运行 `claude-move panel`，不要在桌面 App 的 Claude Code 会话里运行，因为退出 App 会连那个会话一起关掉。有命令行登录的号，卡片上有“打开终端”：弹出一个新终端窗口，在这个号最近用过的项目文件夹里，用它自己的配置目录运行 `claude`（和 `claude-move term <账号>` 一样，不读登录信息）；“打开终端（手机可连）”再加上 `--remote-control <名字>`，手机 Claude App 登录同一个号就能连上。两条命令也都能一键复制。`~/.claude` 和某个 `~/.claude-*` 显示的是同一个号时，用 `~/.claude-*` 那个。
 - `app install [--icon 图片] [--no-dock]`：生成 `~/Applications/Claude Move.app` 并放进程序坞，双击就打开面板，不用开终端。它独立运行，从面板退出桌面 App 不会把它关掉；再双击会回到已经开着的面板；页面关掉 30 分钟后自己停。`--icon` 可以换成任意图片当图标。
-- `term <账号>`：弹出一个终端窗口，用这个号的命令行登录目录（`CLAUDE_CONFIG_DIR=~/.claude-<名字>`）运行 Claude Code。
+- `term <账号> [--rc]`：弹出一个终端窗口，在这个号最近用过的项目文件夹里，用它的命令行登录目录（`CLAUDE_CONFIG_DIR=~/.claude-<名字>`）运行 Claude Code；`--rc` 以 Remote Control 会话启动、用账号名字命名，手机 App 登录同一个号就能连上。
 - `watch install` / `watch uninstall`：装上（或卸掉）状态栏记录器，用命令行版时记下官方百分比。
 
 **额度面板：** `claude-move usage` 把几个号放在一起看，告诉你该换到哪个：

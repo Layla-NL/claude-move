@@ -298,6 +298,18 @@ class Usage(unittest.TestCase):
         script = self.home / ".config/claude-move/term/claude-second.command"
         self.assertEqual(script.read_text().splitlines()[2:], [f"export CLAUDE_CONFIG_DIR={c}", "exec /opt/x/claude"])
         self.assertTrue(os.access(script, os.X_OK))
+        # the CLI folder's newest transcript names the project (inside a worktree), so the window starts there
+        proj = self.home / "app"
+        (proj / ".claude/worktrees/w1").mkdir(parents=True)
+        (c / "projects/-app").mkdir(parents=True)
+        (c / "projects/-app/s.jsonl").write_text(json.dumps({"type": "summary"}) + "\n"
+                                                + json.dumps({"type": "user", "cwd": str(proj / ".claude/worktrees/w1")}) + "\n")
+        r = self.run_tool("term", "second", "--rc", CLAUDE_MOVE_TERM_CMD="true", CLAUDE_MOVE_CLAUDE="/opt/x/claude")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--remote-control second", r.stdout)
+        lines = (self.home / ".config/claude-move/term/claude-second-rc.command").read_text().splitlines()
+        self.assertEqual(lines[1], f"cd {proj} 2>/dev/null || cd ~ || exit 1")
+        self.assertEqual(lines[3], "exec /opt/x/claude --remote-control second")
         r = self.run_tool("term", "aaaa", CLAUDE_MOVE_TERM_CMD="true")  # has sessions, but no CLI login
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("No CLI login", r.stderr)
@@ -374,7 +386,9 @@ class Panel(unittest.TestCase):
         c.mkdir()
         (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
         self.start()
-        self.assertIn(f'data-term="{self.b}"', self.call(f"/?t={self.token}", token=False)[1])
+        page = self.call(f"/?t={self.token}", token=False)[1]
+        self.assertIn(f'data-term="{self.b}" data-rc="1"', page)
+        self.assertIn(f'data-copy="CLAUDE_CONFIG_DIR=~/.claude-second claude --remote-control bbbbbbbb"', page)
         self.assertEqual(self.call("/terminal", {"acct": self.a})[0], 404)  # no CLI login for this one
         self.assertEqual(self.call("/terminal", {"acct": ""})[0], 404)
         self.assertFalse((self.home / "term").exists())
@@ -383,6 +397,8 @@ class Panel(unittest.TestCase):
         self.assertEqual(code, 200, body)
         self.assertTrue((self.home / "term").exists())
         self.assertIn(f"CLAUDE_CONFIG_DIR={c}", (self.home / ".config/claude-move/term/claude-second.command").read_text())
+        self.assertEqual(self.call("/terminal", {"acct": self.b, "rc": True})[0], 200)
+        self.assertIn("--remote-control bbbbbbbb", (self.home / ".config/claude-move/term/claude-second-rc.command").read_text())
 
     def test_usage_text_fallback(self):
         import importlib.machinery, importlib.util

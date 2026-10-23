@@ -148,8 +148,10 @@ T = {
     "p_copy": ("Copy CLI command", "复制命令行启动命令"),
     "p_copied": ("Copied", "已复制"),
     "p_term": ("Open in Terminal", "打开终端"),
+    "p_term_rc": ("Open in Terminal, reachable from phone", "打开终端（手机可连）"),
+    "p_copy_rc": ("Copy phone-reachable command", "复制手机可连的命令"),
     "p_term_done": ("Opened", "已打开"),
-    "t_open": ("Opened a Terminal window running Claude Code as {a} ({c})", "已打开终端窗口，用 {a} 运行 Claude Code（{c}）"),
+    "t_open": ("Opened a Terminal window running Claude Code as {a} in {d} ({c})", "已打开终端窗口，用 {a} 在 {d} 运行 Claude Code（{c}）"),
     "t_none": ("No CLI login for \"{t}\". Sign it in once: CLAUDE_CONFIG_DIR=~/.claude-<name> claude, then /login.",
                "“{t}”没有命令行登录。先登录一次：CLAUDE_CONFIG_DIR=~/.claude-<名字> claude，再输入 /login。"),
     "p_working": ("Working…", "处理中……"),
@@ -745,19 +747,70 @@ def cli_dir(token, extra=()):
     return hits[0] if token and hits else None
 
 
-def open_terminal(cfg):
-    """A new Terminal window running `claude` with this config folder, so the CLI uses that folder's own login.
-    It writes a small .command file and lets macOS open it: no Automation permission, no credentials touched."""
+def rc_name(acct):
+    return names().get(acct) or acct[:8]
+
+
+def rc_command(cfg):
+    from shlex import quote
+    return f"{cli_command(cfg)} --remote-control {quote(rc_name(cli_account(cfg)))}"
+
+
+def recent_cwd(cfg):
+    """The project folder the account behind `cfg` used last: its newest desktop session or the newest transcript in
+    the CLI folder, whichever is newer. A worktree counts as its repo. None when that folder is gone."""
+    acct = cli_account(cfg)
+    best = (0, None)
+    for a in accounts():
+        if a["acct"] == acct:
+            for _, d in a["sessions"]:
+                ts = (d.get("lastActivityAt") or 0) / 1000
+                if ts > best[0] and (d.get("originCwd") or d.get("cwd")):
+                    best = (ts, d.get("originCwd") or d.get("cwd"))
+    jsonl = []
+    for f in (cfg / "projects").glob("*/*.jsonl"):
+        try:
+            jsonl.append((f.stat().st_mtime, f))
+        except OSError:
+            pass
+    if jsonl:
+        ts, f = max(jsonl)
+        if ts > best[0]:
+            try:
+                with f.open(encoding="utf-8", errors="replace") as fh:
+                    for _, line in zip(range(50), fh):
+                        try:
+                            cwd = json.loads(line).get("cwd")
+                        except (ValueError, AttributeError):
+                            continue
+                        if cwd:
+                            best = (ts, cwd)
+                            break
+            except OSError:
+                pass
+    cwd = best[1]
+    if cwd and os.sep + ".claude" + os.sep + "worktrees" + os.sep in cwd:
+        cwd = cwd.split(os.sep + ".claude" + os.sep + "worktrees" + os.sep)[0]
+    return Path(cwd) if cwd and Path(cwd).is_dir() else None
+
+
+def open_terminal(cfg, rc=False):
+    """A new Terminal window running `claude` with this config folder, so the CLI uses that folder's own login, in the
+    account's last project folder; with rc, as a Remote Control session named after the account so the phone app
+    can join it. It writes a small .command file and lets macOS open it: no Automation permission, no credentials."""
     from shlex import quote
     exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
     env = "unset CLAUDE_CONFIG_DIR\n" if cfg == HOME / ".claude" else f"export CLAUDE_CONFIG_DIR={quote(str(cfg))}\n"
-    script = CONF / "term" / (cfg.name.lstrip(".") + ".command")
+    cwd = recent_cwd(cfg)
+    go = f"cd {quote(str(cwd))} 2>/dev/null || cd ~ || exit 1\n" if cwd else "cd ~ || exit 1\n"
+    run = f"exec {quote(exe)}" + (f" --remote-control {quote(rc_name(cli_account(cfg)))}" if rc else "")
+    script = CONF / "term" / (cfg.name.lstrip(".") + ("-rc" if rc else "") + ".command")
     script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text(f"#!/bin/sh\ncd ~ || exit 1\n{env}exec {quote(exe)}\n")
+    script.write_text(f"#!/bin/sh\n{go}{env}{run}\n")
     script.chmod(0o700)
     cmd = os.environ.get("CLAUDE_MOVE_TERM_CMD")
     subprocess.run(cmd + " " + quote(str(script)), shell=True) if cmd else subprocess.run(["open", str(script)], check=False)
-    return script
+    return cwd
 
 
 def cmd_term(args):
@@ -765,8 +818,9 @@ def cmd_term(args):
     if not cfg:
         sys.exit(t("t_none", t=args.account))
     acct = cli_account(cfg)
-    open_terminal(cfg)
-    print(t("t_open", a=names().get(acct, acct[:8]), c=cli_command(cfg)))
+    cwd = open_terminal(cfg, args.rc)
+    shown = "~/" + str(cwd.relative_to(HOME)) if cwd and str(cwd).startswith(str(HOME) + os.sep) else str(cwd or "~")
+    print(t("t_open", a=names().get(acct, acct[:8]), d=shown, c=rc_command(cfg) if args.rc else cli_command(cfg)))
 
 
 def cli_configs(extra=()):
@@ -946,6 +1000,7 @@ def usage_report(extra_cfgs=(), now=None):
         rows.append({
             "acct": acct, "name": names().get(acct, "") or acct[:8], "plan": plan_of.get(acct, ""),
             "cli": cli_command(cli_of[acct]) if acct in cli_of else "",
+            "cli_rc": rc_command(cli_of[acct]) if acct in cli_of else "",
             "cool": {"kind": cool[2], "until": cool[3]} if cool else None,
             "week_usd": spent_week, "five_usd": spent_5h, "week_reset": w1, "daily": daily,
             "official": {"at": off["at"], "rows": rows_off} if off and rows_off else None,
@@ -1036,8 +1091,10 @@ def render_html(rep, live=None):
         foot = f'<p class="foot">{escape(t("u_reset", w=clock(r["week_reset"])))}</p>' if r["week_reset"] else ""
         plan = f' <small class="plan">{escape(r["plan"])}</small>' if r["plan"] else ""
         if live and r["cli"]:
-            foot += (f'<button class="ghost" data-term="{escape(r["acct"])}">{escape(t("p_term"))}</button> '
-                     f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>')
+            foot += (f'<div class="tools"><button class="ghost" data-term="{escape(r["acct"])}">{escape(t("p_term"))}</button>'
+                     f'<button class="ghost" data-term="{escape(r["acct"])}" data-rc="1">{escape(t("p_term_rc"))}</button>'
+                     f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>'
+                     f'<button class="ghost" data-copy="{escape(r["cli_rc"])}">{escape(t("p_copy_rc"))}</button></div>')
         cards.append(f'<section class="card {state}"><header><h2>{escape(r["name"])}{plan}</h2>'
                      f'<span class="badge">{escape(badge)}</span></header>{cool}{nums}{meters}'
                      f'<div class="days">{bars}</div>{foot}</section>')
@@ -1076,6 +1133,7 @@ header{{display:flex;justify-content:space-between;align-items:center;gap:8px}} 
 .live .row{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}} .live label{{font-size:13px;color:var(--dim)}}
 button{{font:inherit;font-size:14px;font-weight:600;border-radius:10px;padding:8px 14px;border:0;cursor:pointer;background:var(--ok);color:#fff}}
 button:disabled{{opacity:.45;cursor:default}} button.ghost{{background:transparent;color:var(--dim);border:1px solid var(--line);font-size:12px;padding:4px 10px;margin-top:10px}}
+.tools{{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}} .tools button.ghost{{margin-top:0}}
 pre.log{{white-space:pre-wrap;font-size:12px;background:var(--bg);border-radius:10px;padding:10px;margin:10px 0 0;max-height:240px;overflow:auto}}
 </style></head><body><main><h1>{escape(t("u_head"))}</h1><p class="sub">{escape(clock(now))} · claude-move {__version__}</p>
 <p class="advice">{escape(pick)}</p>{live_bar(live)}<div class="grid">{"".join(cards)}</div>
@@ -1123,7 +1181,7 @@ document.getElementById("refresh").onclick = async () => {{
 document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () =>
   navigator.clipboard.writeText(b.dataset.copy).then(() => {{ b.textContent = T.p_copied; }}));
 document.querySelectorAll("[data-term]").forEach(b => b.onclick = async () => {{
-  const r = await api("/terminal", {{acct: b.dataset.term}});
+  const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc}});
   if (r.ok) b.textContent = T.p_term_done; else {{ const log = document.getElementById("log"); log.hidden = false; log.textContent = r.log; }}
 }}));
 poll(); setInterval(poll, 3000);
@@ -1294,7 +1352,7 @@ def cmd_panel(args):
                 cfg = next((c for c in cli_configs(args.config or ()) if acct and cli_account(c) == acct), None)
                 if not cfg:
                     return self.send(404, json.dumps({"ok": False, "log": t("t_none", t=acct[:8])}, ensure_ascii=False))
-                open_terminal(cfg)
+                open_terminal(cfg, bool(body.get("rc")))
                 return self.send(200, json.dumps({"ok": True, "log": ""}))
             if path == "/refresh":
                 import contextlib
@@ -1629,6 +1687,8 @@ def main(argv=None):
     ap.set_defaults(fn=cmd_app)
     tm = sub.add_parser("term", help="open a Terminal window running Claude Code with that account's CLI login")
     tm.add_argument("account", help="label or id prefix of an account signed in under ~/.claude or ~/.claude-*")
+    tm.add_argument("--rc", action="store_true",
+                    help="start it as a Remote Control session named after the account, so the phone app can join")
     tm.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
     tm.set_defaults(fn=cmd_term)
     w = sub.add_parser("watch", help="record official CLI rate limits from the Claude Code status line")
