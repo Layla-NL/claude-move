@@ -121,6 +121,26 @@ about the login is read), and "Open in Terminal, reachable from phone", which ad
 commands can also be copied (`CLAUDE_CONFIG_DIR=~/.claude-work claude`). When `~/.claude` and a `~/.claude-*` folder show
 the same account, the `~/.claude-*` one is used.
 
+### Everything else from the panel
+
+So you never need a terminal, the panel also does the rest. Each card can be renamed, and has "Install / Remove
+status line recorder" for its CLI login (it asks first, since that edits the login's `settings.json`), or "Add CLI
+login" when the account has none: that opens a Terminal window with the CLI's own `claude auth login --claudeai` for
+a new `~/.claude-<name>` folder, you sign in in the browser, and the panel names the account once the login shows
+up. Below the cards:
+
+- **Move sessions:** pick source, target and which sessions (last 3 or 7 days, all, or ticked ones), preview, then
+  move. An open desktop app is quit and reopened around the move.
+- **Undo a move:** the backups, each with an undo button.
+- **Sessions by account**, and **open CLI sessions in the desktop app** (the panel's `import-cli`).
+- **Auto-continue sessions:** each `run` session, which account it is on now and when it switched.
+- **Check-up:** `doctor`, with a fix button where there is one, and a button to add another account's CLI login.
+- **Notifications:** on/off, levels, a test.
+- **Updates:** asks GitHub for the latest release when you press it; nothing is downloaded.
+
+Every button is a fixed action, and every value the page sends (account, backup, session id, label, folder name)
+is checked against what is on this Mac first.
+
 ### Going on at a usage limit
 
 `claude-move run <account>` starts `claude` with that account's CLI login and a session id it picks. It watches that
@@ -209,6 +229,17 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 只算这台 Mac 上的 Claude Code，网页聊天和别的设备上的用量算不进来。
 
 **撞上限自动续接：** `claude-move run <账号>` 用这个号的命令行登录启动 `claude`，会话 id 由它事先定好，然后盯着这个会话的记录（子代理的也算）。一出现官方的限额提示，就挨个问别的命令行登录的 `/usage`，挑没在冷却、剩得最多的那个；然后停掉 `claude`，把会话记录复制到那个号的目录（那边原来有这个会话的话，先另存到 `~/.config/claude-move/run-backups`），在那边 `claude --resume <id>` 接上，并发一句“接着做”。原来那份记录不动。没有能换的号时，`claude` 原样留着，并弹通知告诉你。`--rc` 让每一段都是用账号名字命名的 Remote Control 会话。面板上勾选“打开的终端撞到额度上限时自动换号接着干”，打开终端的按钮就会走 `run`。只对命令行版有效，桌面 App 的登录还是你自己点；后台任务和正在跑的工具调用不会跟过去，新号拿到的是对话本身，从那里接着做。这样轮换几个号是否允许，取决于 Anthropic 对你这个套餐的条款，用之前先看一下。
+
+**面板里全都能做（不用开命令行）：** 每张卡片可以改名；有命令行登录的号可以“装/卸状态栏记录器”（会改这个登录的 `settings.json`，点之前会问你）；没有命令行登录的号有“加命令行登录”：弹出终端窗口跑官方的 `claude auth login --claudeai`，登录目录是新建的 `~/.claude-<名字>`，你在浏览器里登录，面板认出来后自动给它起名。卡片下面还有：
+- **搬会话：** 选从哪个号搬到哪个号、搬哪些（最近 3 天、7 天、全部，或者勾选），先预览再搬；桌面 App 开着的话会先退出、搬完再打开。
+- **撤回搬家：** 列出备份，每个都能一键撤回。
+- **各账号的会话**，以及 **命令行会话导入桌面 App**（面板版的 `import-cli`）。
+- **自动续接的会话：** 每个 `run` 会话现在在哪个号、什么时候换过。
+- **自检：** 就是 `doctor`，能修的旁边有修复按钮；还有“再加一个号的命令行登录”。
+- **通知：** 开关、阈值、测试通知。
+- **检查更新：** 你点了才去 GitHub 看最新发布，不下载任何东西。
+
+每个按钮都只做固定的事，页面发来的每个值（账号、备份、会话 id、名字、目录名）都先和本机实际有的对一遍。
 
 **通知和自检：** 官方百分比一更新就检查要不要通知，来源是各命令行登录里的状态栏记录器（`CLAUDE_CONFIG_DIR=~/.claude-work claude-move watch install`）或 `usage --refresh`。`claude-move doctor` 会列出还缺什么。
 

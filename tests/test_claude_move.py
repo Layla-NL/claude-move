@@ -1,6 +1,7 @@
 """Tests for claude-move against a fake session tree. Run: python3 -m unittest discover tests"""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -338,7 +339,8 @@ class Panel(unittest.TestCase):
         env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
                    CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1",
                    CLAUDE_MOVE_QUIT_CMD=f"touch {self.home}/quit", CLAUDE_MOVE_OPEN_CMD=f"touch {self.home}/open",
-                   CLAUDE_MOVE_TERM_CMD=f"touch {self.home}/term; true")
+                   CLAUDE_MOVE_TERM_CMD=f"touch {self.home}/term; true",
+                   CLAUDE_MOVE_UPDATE_URL=(self.home / "rel.json").as_uri(), CLAUDE_MOVE_NOTIFY_CMD="true")
         self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open"], stdout=subprocess.PIPE, text=True, env=env)
         self.addCleanup(lambda: (self.proc.kill(), self.proc.wait(), self.proc.stdout.close()))
         line = self.proc.stdout.readline()
@@ -404,6 +406,83 @@ class Panel(unittest.TestCase):
         self.assertEqual(self.call("/terminal", {"acct": self.b, "auto": True})[0], 200)
         auto = (self.home / ".config/claude-move/term/claude-second-auto.command").read_text()
         self.assertIn(f"run --config {c} {self.b}", auto)
+
+    def test_panel_tools(self):
+        c = self.home / ".claude-second"
+        c.mkdir()
+        (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
+        sid = "0b7a6f3e-0000-4000-8000-000000000001"
+        write(c / "projects/-p" / f"{sid}.jsonl", type="user", message={"content": "fix the login page"})
+        (self.home / "rel.json").write_text(json.dumps({"tag_name": "v9.9.9", "html_url": "https://example.invalid/r"}))
+        self.start()
+        api = lambda path, body=None: json.loads(self.call("/api/" + path, body)[1])
+        page = self.call(f"/?t={self.token}", token=False)[1]
+        for needle in ('id="t-move"', 'id="t-undo"', 'id="t-doc"', f'data-rename="{self.a}"', f'data-login="{self.a}"',
+                       f'data-rec="{self.b}" data-on="0"'):
+            self.assertIn(needle, page)
+        self.assertEqual({a["acct"] for a in api("accounts")["accounts"]}, {self.a, self.b})
+        # names: checked and saved; unknown accounts refused
+        self.assertTrue(api("name", {"acct": self.a, "label": "work"})["ok"])
+        self.assertFalse(api("name", {"acct": self.a, "label": "x" * 40})["ok"])
+        self.assertEqual(self.call("/api/name", {"acct": "nope", "label": "x"})[0], 400)
+        self.assertEqual(json.loads((self.home / ".config/claude-move/accounts.json").read_text())[self.a], "work")
+        # move: preview, then the ticked session only, then undo it
+        self.assertEqual([s["id"] for s in api("sessions?acct=" + self.a)["sessions"]], ["local_1"])
+        r = api("move", {"from": self.a, "to": self.b, "range": "all", "dry": True})
+        self.assertIn("Dry run", r["log"])
+        self.assertEqual(api("backups")["backups"], [])  # a preview writes nothing
+        r = api("move", {"from": self.a, "to": self.b, "range": "pick", "only": ["local_1", "local_bogus"]})
+        self.assertTrue(r["ok"], r["log"])
+        backups = api("backups")["backups"]
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(self.call("/api/undo", {"name": "../etc"})[0], 400)
+        self.assertTrue(api("undo", {"name": backups[0]["name"]})["ok"])
+        self.assertTrue(api("backups")["backups"][0]["undone"])
+        # status line recorder on and off in that login's own settings.json
+        self.assertTrue(api("watch", {"acct": self.b, "on": True})["ok"])
+        self.assertIn("watch record", json.loads((c / "settings.json").read_text())["statusLine"]["command"])
+        api("watch", {"acct": self.b, "on": False})
+        self.assertNotIn("statusLine", json.loads((c / "settings.json").read_text()))
+        self.assertEqual(self.call("/api/watch", {"acct": self.a, "on": True})[0], 400)  # no CLI login
+        # add a CLI login: the official sign-in in a Terminal window; the new account is named once it shows up
+        self.assertFalse(api("login", {"name": "a b"})["ok"])
+        self.assertTrue(api("login", {"name": "new"})["ok"])
+        self.assertIn("auth login --claudeai", (self.home / ".config/claude-move/term/login-claude-new.command").read_text())
+        n = "dddddddd-0000-0000-0000-000000000004"
+        (self.home / ".claude-new/.claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": n}}))
+        self.call("/state")
+        self.assertEqual(json.loads((self.home / ".config/claude-move/accounts.json").read_text())[n], "new")
+        self.assertFalse(api("login", {"name": "new"})["ok"])  # already signed in
+        # notifications
+        self.assertFalse(api("notify", {"on": True, "levels": "80,200"})["ok"])
+        self.assertTrue(api("notify", {"on": True, "levels": "95, 80"})["ok"])
+        self.assertEqual(api("notify")["levels"], [80, 95])
+        # CLI sessions into the desktop app's folder, once
+        rows = api("cli-sessions?acct=" + self.b)["sessions"]
+        self.assertEqual([(x["id"], x["title"], x["in_desk"]) for x in rows], [(sid, "fix the login page", False)])
+        self.assertIn("Copied 1", api("import", {"acct": self.b, "ids": [sid, "../../x"]})["log"])
+        self.assertTrue((self.desk / "projects/-p" / f"{sid}.jsonl").exists())
+        self.assertIn("Copied 0", api("import", {"acct": self.b, "ids": [sid]})["log"])
+        # runs, doctor, update
+        write(self.home / ".config/claude-move/runs" / f"{sid}.json", sid=sid, pid=999999, cfg=str(c), acct=self.b,
+              started=self.now, ended=None, switches=[{"at": self.now, "from": self.a, "to": self.b}])
+        run = api("runs")["runs"][0]
+        self.assertEqual((run["title"], run["running"], run["switches"][0]["from"]), ("fix the login page", False, "work"))
+        self.assertTrue(any(i["fix"] for i in api("doctor")["items"]))
+        up = api("update")
+        self.assertTrue(up["newer"], up)
+        self.assertIn("9.9.9", up["log"])
+        self.assertEqual(self.call("/api/accounts", token=False)[0], 403)
+
+    @unittest.skipUnless(shutil.which("node"), "needs node to parse the page script")
+    def test_panel_script_parses(self):
+        import re
+        self.start()
+        page = self.call(f"/?t={self.token}", token=False)[1]
+        js = self.home / "page.js"
+        js.write_text(re.findall(r"<script>(.*?)</script>", page, re.S)[-1])
+        r = subprocess.run(["node", "--check", str(js)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_usage_text_fallback(self):
         import importlib.machinery, importlib.util

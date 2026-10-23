@@ -187,29 +187,91 @@ T = {
     "n_sent": ("Sent a test notification. If none showed up, allow notifications for Script Editor in System Settings > Notifications.",
                "已发一条测试通知。没看到的话，到 系统设置 → 通知 里允许“脚本编辑器”。"),
     "d_desk": ("Desktop app accounts:", "桌面 App 的账号："),
-    "d_signed": ("  signed in now: {a}", "  现在登录的：{a}"),
-    "d_unnamed": ("  ! {a} has no label: claude-move name {a} <label>", "  ! {a} 还没起名字：claude-move name {a} <名字>"),
+    "d_signed": ("signed in now: {a}", "现在登录的：{a}"),
+    "d_unnamed": ("{a} has no label: claude-move name {a} <label>", "{a} 还没起名字：claude-move name {a} <名字>"),
     "d_cli": ("CLI logins:", "命令行登录："),
-    "d_cli_row": ("  {d}: {a}{p} · {s}", "  {d}：{a}{p} · {s}"),
-    "d_cli_none": ("  {d}: not signed in", "  {d}：没登录"),
+    "d_cli_row": ("{d}: {a}{p} · {s}", "{d}：{a}{p} · {s}"),
+    "d_cli_none": ("{d}: not signed in", "{d}：没登录"),
     "d_ok_at": ("/usage answered {w} ago", "{w}前 /usage 正常"),
     "d_bad_at": ("no plan usage at the last check {w} ago", "{w}前检查时没有套餐额度"),
     "d_unchecked": ("not checked yet (doctor --refresh)", "还没检查过（doctor --refresh）"),
-    "d_dup": ("  ! {a} shows up in {ds}; claude-move uses {u}.", "  ! {a} 同时出现在 {ds}；claude-move 用的是 {u}。"),
-    "d_stale": ("  {a} also has a cached profile in {d}, which had no plan usage at the last check; harmless, {u} is used.",
-                "  {a} 在 {d} 里还留着旧的账号资料（上次检查没有套餐额度），不影响，用的是 {u}。"),
-    "d_no_cli": ("  ! {a} has desktop sessions but no CLI login, so Open in Terminal and run cannot use it: CLAUDE_CONFIG_DIR=~/.claude-{n} claude, then /login",
-                 "  ! {a} 有桌面会话，但没有命令行登录，打开终端和自动续接都用不了它：CLAUDE_CONFIG_DIR=~/.claude-{n} claude，再输入 /login"),
-    "d_watch": ("  ! no status line recorder in {d}, so its live % and notifications only update on usage --refresh: {c}",
-                "  ! {d} 没装状态栏记录器，它的实时百分比和通知只在 usage --refresh 时更新：{c}"),
+    "d_dup": ("{a} shows up in {ds}; claude-move uses {u}.", "{a} 同时出现在 {ds}；claude-move 用的是 {u}。"),
+    "d_stale": ("{a} also has a cached profile in {d}, which had no plan usage at the last check; harmless, {u} is used.",
+                "{a} 在 {d} 里还留着旧的账号资料（上次检查没有套餐额度），不影响，用的是 {u}。"),
+    "d_no_cli": ("{a} has desktop sessions but no CLI login, so Open in Terminal and run cannot use it: CLAUDE_CONFIG_DIR=~/.claude-{n} claude, then /login",
+                 "{a} 有桌面会话，但没有命令行登录，打开终端和自动续接都用不了它：CLAUDE_CONFIG_DIR=~/.claude-{n} claude，再输入 /login"),
+    "d_watch": ("no status line recorder in {d}, so its live % and notifications only update on usage --refresh: {c}",
+                "{d} 没装状态栏记录器，它的实时百分比和通知只在 usage --refresh 时更新：{c}"),
     "d_misc": ("Other:", "其他："),
-    "d_notify_on": ("  notifications: on at {l}%", "  通知：开，阈值 {l}%"),
-    "d_notify_off": ("  notifications: off (claude-move notify on)", "  通知：关（claude-move notify on）"),
-    "d_app_ok": ("  Claude Move.app: signature OK", "  Claude Move.app：签名正常"),
-    "d_app_bad": ("  ! Claude Move.app: signature broken, macOS may call it damaged: claude-move app install",
-                  "  ! Claude Move.app：签名坏了，macOS 可能说它“已损坏”：claude-move app install"),
+    "d_notify_on": ("notifications: on at {l}%", "通知：开，阈值 {l}%"),
+    "d_notify_off": ("notifications: off (claude-move notify on)", "通知：关（claude-move notify on）"),
+    "d_app_ok": ("Claude Move.app: signature OK", "Claude Move.app：签名正常"),
+    "d_app_bad": ("Claude Move.app: signature broken, macOS may call it damaged: claude-move app install",
+                  "Claude Move.app：签名坏了，macOS 可能说它“已损坏”：claude-move app install"),
     "d_fine": ("No problems found.", "没发现问题。"),
     "d_count": ("{n} thing(s) to look at.", "有 {n} 处要看一下。"),
+    "pt_move": ("Move sessions: pick and preview", "搬会话：挑着搬、先预览"),
+    "pt_from": ("From", "从"),
+    "pt_to": ("to", "搬到"),
+    "pt_r3": ("used in the last 3 days", "最近 3 天用过的"),
+    "pt_r7": ("used in the last 7 days", "最近 7 天用过的"),
+    "pt_rall": ("all live sessions", "全部在用的"),
+    "pt_rpick": ("only the ones ticked below", "只搬下面勾选的"),
+    "pt_preview": ("Preview", "预览"),
+    "pt_do_move": ("Move", "搬"),
+    "pt_move_confirm": ("The desktop app has to be closed while moving: quit it now, move, and reopen it?",
+                        "搬的时候桌面 App 要关着：现在退出、搬完再重新打开？"),
+    "pt_undo": ("Undo a move", "撤回搬家"),
+    "pt_undo_btn": ("Undo this", "撤回这次"),
+    "pt_undo_confirm": ("Put {a}'s list back as it was before this move? An open desktop app is quit and reopened.",
+                        "把 {a} 的列表恢复成这次搬之前的样子？桌面 App 开着的话会先退出、弄完再打开。"),
+    "pt_undone": ("undone", "已撤回"),
+    "pt_sessions": ("Sessions by account", "各账号的会话"),
+    "pt_archived": ("archived", "已归档"),
+    "pt_import": ("Open CLI sessions in the desktop app", "命令行会话导入桌面 App"),
+    "pt_import_btn": ("Copy the ticked ones into the desktop app", "把勾选的拷到桌面 App"),
+    "pt_in_desk": ("already there", "已经有了"),
+    "pt_runs": ("Auto-continue sessions", "自动续接的会话"),
+    "pt_runs_none": ("None yet. Tick \"switch account and go on\" above, then open a terminal.",
+                     "还没有。勾选上面的“自动换号接着干”，再打开终端。"),
+    "pt_run_line": ("{s} · now on {a} · {n} switch(es) · started {w}", "{s} · 现在在 {a} · 换过 {n} 次 · {w} 开始"),
+    "pt_run_switch": ("{w}  {a} -> {b}", "{w}  {a} → {b}"),
+    "pt_running": ("running", "运行中"),
+    "pt_ended": ("ended", "已结束"),
+    "pt_doctor": ("Check-up", "自检"),
+    "pt_doctor_refresh": ("Check again (asks each login's /usage)", "重新检查（会问各登录的 /usage）"),
+    "pt_fix": ("Fix", "修复"),
+    "pt_notify": ("Notifications", "通知"),
+    "pt_notify_on": ("Notify when an official % passes", "官方百分比超过这些时通知"),
+    "pt_save": ("Save", "保存"),
+    "pt_test": ("Send a test", "发测试通知"),
+    "pt_update": ("Updates", "检查更新"),
+    "pt_update_btn": ("Look on GitHub for a newer version", "去 GitHub 看有没有新版本"),
+    "pt_update_new": ("claude-move {v} is out (you have {c}): {u}", "claude-move {v} 出了（你现在是 {c}）：{u}"),
+    "pt_update_none": ("Up to date: you have {c}, the latest release is {v}.", "已经是最新的：你现在是 {c}，最新发布是 {v}。"),
+    "pt_update_fail": ("Could not reach GitHub: {e}", "连不上 GitHub：{e}"),
+    "pt_rename": ("Rename", "改名"),
+    "pt_rename_ask": ("New label for {a} (empty clears it):", "给 {a} 起个新名字（留空就清掉）："),
+    "pt_rec_on": ("Install status line recorder", "装状态栏记录器"),
+    "pt_rec_off": ("Remove status line recorder", "卸掉状态栏记录器"),
+    "pt_rec_confirm": ("This edits the statusLine setting in {p} (your current one keeps showing). Go on?",
+                       "这会改 {p} 里的 statusLine（原来的状态栏照样显示）。继续？"),
+    "pt_login": ("Add CLI login", "加命令行登录"),
+    "pt_login_new": ("Add another account's CLI login", "再加一个号的命令行登录"),
+    "pt_login_ask": ("Short name for the new account (letters, digits, dashes; the folder becomes ~/.claude-<name>):",
+                     "给新号起个短名字（字母、数字、短横线；登录目录就是 ~/.claude-<名字>）："),
+    "pt_login_opened": ("A Terminal window started the official sign-in for {d}. Sign in with {a} in the browser that opens; the panel picks it up by itself.",
+                        "已弹出终端窗口，给 {d} 走官方登录。在打开的浏览器里用 {a} 登录，面板会自己认出来。"),
+    "pt_login_bad": ("Use 1 to 24 letters, digits or dashes.", "只能用 1 到 24 个字母、数字或短横线。"),
+    "pt_login_exists": ("{d} is already signed in.", "{d} 已经登录过了。"),
+    "pt_login_any": ("the account you want to add", "要加的那个号"),
+    "l_head": ("Signing {d} into Claude", "给 {d} 登录 Claude"),
+    "l_hint": ("A browser opens: sign in there with {a}.", "会打开浏览器，在里面用 {a} 登录。"),
+    "l_done": ("Done. You can close this window.", "好了，可以关掉这个窗口。"),
+    "pt_bad": ("Not allowed.", "不允许。"),
+    "pt_label_bad": ("A label is at most 32 characters, on one line.", "名字最多 32 个字，不能换行。"),
+    "pt_saved": ("Saved.", "已保存。"),
+    "pt_levels_bad": ("Levels are numbers from 1 to 100, separated by commas.", "阈值是 1 到 100 的数字，用逗号隔开。"),
     "u_head": ("Quota by account", "各账号额度"),
     "u_back": ("{k} limit used up · back at {w}", "{k}额度用完 · {w} 恢复"),
     "u_off_head": ("Official, fetched {a} ago", "官方数据，{a}前取得"),
@@ -530,13 +592,22 @@ def cmd_import_cli(args):
     if not todo:
         print(t("nothing"))
         return
-    ddir.mkdir(parents=True, exist_ok=True)
     for f in todo:
-        shutil.copy2(f, ddir / f.name)
-        side = sdir / f.stem
-        if side.is_dir() and not (ddir / f.stem).exists():
-            shutil.copytree(side, ddir / f.stem)
+        import_one(f, dst_cfg)
     print(t("imp_done", n=len(todo)))
+
+
+def import_one(f, dst_cfg):
+    """Copy one CLI transcript (and its side folder) into another config folder; never overwrites."""
+    ddir = dst_cfg / "projects" / f.parent.name
+    if (ddir / f.name).exists():
+        return False
+    ddir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(f, ddir / f.name)
+    side = f.parent / f.stem
+    if side.is_dir() and not (ddir / f.stem).exists():
+        shutil.copytree(side, ddir / f.stem)
+    return True
 
 
 # ---------- quota panel: usage / watch
@@ -550,6 +621,8 @@ LOGINS = CONF / "logins.json"
 NOTIFY = CONF / "notify.json"
 NOTIFIED = CONF / "notified.json"
 LEVELS = (75, 90, 95)
+RUNS = CONF / "runs"
+PENDING = CONF / "pending-logins.json"
 KEEP_DAYS = 35
 WEEK, FIVE_H = 7 * 86400, 5 * 3600
 # $ per million input tokens; output, cache writes and cache reads scale from it as in the public price list
@@ -863,12 +936,17 @@ def open_terminal(cfg, rc=False, auto=False):
     else:
         run = f"exec {quote(exe)}" + (f" --remote-control {quote(rc_name(cli_account(cfg)))}" if rc else "")
     script = CONF / "term" / (cfg.name.lstrip(".") + ("-rc" if rc else "") + ("-auto" if auto else "") + ".command")
+    open_command(script, f"#!/bin/sh\n{go}{env}{run}\n")
+    return cwd
+
+
+def open_command(script, body):
+    from shlex import quote
     script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text(f"#!/bin/sh\n{go}{env}{run}\n")
+    script.write_text(body)
     script.chmod(0o700)
     cmd = os.environ.get("CLAUDE_MOVE_TERM_CMD")
     subprocess.run(cmd + " " + quote(str(script)), shell=True) if cmd else subprocess.run(["open", str(script)], check=False)
-    return cwd
 
 
 def cmd_term(args):
@@ -998,7 +1076,7 @@ def short(p):
 
 
 def save_json(path, d):
-    CONF.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
     tmp.replace(path)
@@ -1085,6 +1163,7 @@ def usage_report(extra_cfgs=(), now=None):
             "acct": acct, "name": names().get(acct, "") or acct[:8], "plan": plan_of.get(acct, ""),
             "cli": cli_command(cli_of[acct]) if acct in cli_of else "",
             "cli_rc": rc_command(cli_of[acct]) if acct in cli_of else "",
+            "cfg": str(cli_of[acct]) if acct in cli_of else "",
             "cool": {"kind": cool[2], "until": cool[3]} if cool else None,
             "week_usd": spent_week, "five_usd": spent_5h, "week_reset": w1, "daily": daily,
             "official": {"at": off["at"], "rows": rows_off} if off and rows_off else None,
@@ -1176,11 +1255,20 @@ def render_html(rep, live=None):
             f'<span>{days[i][3:]}</span></div>' for i, v in enumerate(r["daily"]))
         foot = f'<p class="foot">{escape(t("u_reset", w=clock(r["week_reset"])))}</p>' if r["week_reset"] else ""
         plan = f' <small class="plan">{escape(r["plan"])}</small>' if r["plan"] else ""
-        if live and r["cli"]:
-            foot += (f'<div class="tools"><button class="ghost" data-term="{escape(r["acct"])}">{escape(t("p_term"))}</button>'
-                     f'<button class="ghost" data-term="{escape(r["acct"])}" data-rc="1">{escape(t("p_term_rc"))}</button>'
-                     f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>'
-                     f'<button class="ghost" data-copy="{escape(r["cli_rc"])}">{escape(t("p_copy_rc"))}</button></div>')
+        if live:
+            a_ = escape(r["acct"])
+            tools = f'<button class="ghost" data-rename="{a_}">{escape(t("pt_rename"))}</button>'
+            if r["cli"]:
+                on = recorder_on(Path(r["cfg"]))
+                tools += (f'<button class="ghost" data-term="{a_}">{escape(t("p_term"))}</button>'
+                          f'<button class="ghost" data-term="{a_}" data-rc="1">{escape(t("p_term_rc"))}</button>'
+                          f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>'
+                          f'<button class="ghost" data-copy="{escape(r["cli_rc"])}">{escape(t("p_copy_rc"))}</button>'
+                          f'<button class="ghost" data-rec="{a_}" data-on="{1 if on else 0}">'
+                          f'{escape(t("pt_rec_off" if on else "pt_rec_on"))}</button>')
+            else:
+                tools += f'<button class="ghost" data-login="{a_}">{escape(t("pt_login"))}</button>'
+            foot += f'<div class="tools">{tools}</div>'
         cards.append(f'<section class="card {state}"><header><h2>{escape(r["name"])}{plan}</h2>'
                      f'<span class="badge">{escape(badge)}</span></header>{cool}{nums}{meters}'
                      f'<div class="days">{bars}</div>{foot}</section>')
@@ -1220,9 +1308,10 @@ header{{display:flex;justify-content:space-between;align-items:center;gap:8px}} 
 button{{font:inherit;font-size:14px;font-weight:600;border-radius:10px;padding:8px 14px;border:0;cursor:pointer;background:var(--ok);color:#fff}}
 button:disabled{{opacity:.45;cursor:default}} button.ghost{{background:transparent;color:var(--dim);border:1px solid var(--line);font-size:12px;padding:4px 10px;margin-top:10px}}
 .tools{{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}} .tools button.ghost{{margin-top:0}}
+{TOOLS_CSS if live else ""}
 pre.log{{white-space:pre-wrap;font-size:12px;background:var(--bg);border-radius:10px;padding:10px;margin:10px 0 0;max-height:240px;overflow:auto}}
 </style></head><body><main><h1>{escape(t("u_head"))}</h1><p class="sub">{escape(clock(now))} · claude-move {__version__}</p>
-<p class="advice">{escape(pick)}</p>{live_bar(live)}<div class="grid">{"".join(cards)}</div>
+<p class="advice">{escape(pick)}</p>{live_bar(live)}<div class="grid">{"".join(cards)}</div>{tools_html() if live else ""}
 <p class="notes">{escape(t("u_title"))}<br>{escape(t("u_notes"))}</p></main>{live_script(live)}</body></html>"""
 
 
@@ -1270,11 +1359,12 @@ document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () =>
 document.querySelectorAll("[data-term]").forEach(b => b.onclick = async () => {{
   const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc, auto: document.getElementById("auto").checked}});
   if (r.ok) b.textContent = T.p_term_done; else {{ const log = document.getElementById("log"); log.hidden = false; log.textContent = r.log; }}
-}}));
+}});
 const auto = document.getElementById("auto");
 try {{ auto.checked = localStorage.getItem("auto") === "1"; }} catch (e) {{}}
 auto.onchange = () => {{ try {{ localStorage.setItem("auto", auto.checked ? "1" : "0"); }} catch (e) {{}} }};
 poll(); setInterval(poll, 3000);
+{tools_js()}
 </script>"""
 
 
@@ -1414,9 +1504,15 @@ def cmd_panel(args):
                 others = [a for a in accts if a["acct"] != signed and a["sessions"]]
                 src = max(others, key=lambda a: a["last"]) if others else None
                 nm = names()
+                claim_logins()
                 return self.send(200, json.dumps({
                     "signed": {"acct": signed, "name": nm.get(signed, signed[:8])} if signed else None,
-                    "source": {"acct": src["acct"], "name": show(src)} if src else None, "busy": busy["on"]}))
+                    "source": {"acct": src["acct"], "name": show(src)} if src else None, "busy": busy["on"],
+                    "running": app_running()}))
+            if path.startswith("/api/"):
+                q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+                code, out = panel_api("GET", path, q, {}, args.config or ())
+                return self.send(code, json.dumps(out, ensure_ascii=False))
             self.send(404, "{}")
 
         def do_POST(self):
@@ -1444,6 +1540,17 @@ def cmd_panel(args):
                     return self.send(404, json.dumps({"ok": False, "log": t("t_none", t=acct[:8])}, ensure_ascii=False))
                 open_terminal(cfg, bool(body.get("rc")), bool(body.get("auto")))
                 return self.send(200, json.dumps({"ok": True, "log": ""}))
+            if path.startswith("/api/"):
+                heavy = path in ("/api/move", "/api/undo") and not body.get("dry")  # these may quit the desktop app
+                if heavy and busy["on"]:
+                    return self.send(409, json.dumps({"ok": False, "log": t("p_busy")}, ensure_ascii=False))
+                busy["on"] = busy["on"] or heavy
+                try:
+                    code, out = panel_api("POST", path, {}, body if isinstance(body, dict) else {}, args.config or ())
+                finally:
+                    if heavy:
+                        busy["on"] = False
+                return self.send(code, json.dumps(out, ensure_ascii=False))
             if path == "/refresh":
                 import contextlib
                 import io
@@ -1650,12 +1757,30 @@ def recorder_command():
     return f"{sys.executable} {Path(__file__).resolve()} watch record"
 
 
+def recorder_path(c):
+    return (DESKTOP_HOME if c == HOME / ".claude" else c) / "settings.json"
+
+
+def recorder_on(c):
+    s = load(recorder_path(c))
+    line = s.get("statusLine") if isinstance(s, dict) else None
+    return isinstance(line, dict) and "watch record" in (line.get("command") or "")
+
+
 def cmd_watch(args):
     sp = settings_path()
+    if args.action == "record":
+        watch_record(sp, load(WATCH) or {})
+    else:
+        watch_set(sp, args.action == "install")
+
+
+def watch_set(sp, on):
+    """Put the recorder into one settings.json, keeping the status line that was there, or take it out again."""
     state = load(WATCH) or {}
     s = load(sp) or {}
     mine = isinstance(s.get("statusLine"), dict) and "watch record" in (s["statusLine"].get("command") or "")
-    if args.action == "install":
+    if on:
         if mine:
             print(t("w_already", p=sp))
             return
@@ -1670,7 +1795,7 @@ def cmd_watch(args):
         if prev:
             print(t("w_chain"))
         print(t("w_desktop"))
-    elif args.action == "uninstall":
+    else:
         if not mine:
             print(t("w_none", p=sp))
             return
@@ -1682,8 +1807,6 @@ def cmd_watch(args):
         sp.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n")
         WATCH.write_text(json.dumps(state, indent=2) + "\n")
         print(t("w_off", p=sp))
-    else:
-        watch_record(sp, state)
 
 
 def watch_record(sp, state):
@@ -1881,6 +2004,16 @@ def cmd_run(args):
     sid, resume, prompt = args.resume or str(uuid.uuid4()), bool(args.resume), None
     poll = float(os.environ.get("CLAUDE_MOVE_POLL") or 2)
     skip = {}  # accounts that hit a limit in this run -> when they are back
+    runf = RUNS / f"{sid}.json"
+    run = {"sid": sid, "pid": os.getpid(), "cwd": os.getcwd(), "started": time.time(), "acct": cli_account(cfg),
+           "cfg": str(cfg), "switches": [], "ended": None}
+    save_json(runf, run)
+
+    def finish(code):
+        run["ended"] = time.time()
+        save_json(runf, run)
+        sys.exit(code)
+
     signal.signal(signal.SIGINT, lambda *a: None)  # Ctrl-C is for claude; caught signals reset to default in the child
     while True:
         acct = cli_account(cfg)
@@ -1906,7 +2039,7 @@ def cmd_run(args):
             hit = new_limit_hit(cfg, sid, marks)
         if not hit:
             restore_tty()
-            sys.exit(child.returncode if child.returncode >= 0 else 1)
+            finish(child.returncode if child.returncode >= 0 else 1)
         now = time.time()
         skip[acct] = hit["until"] or now + FIVE_H
         skip = {a: u for a, u in skip.items() if u > now}
@@ -1917,7 +2050,7 @@ def cmd_run(args):
             child.wait()
             restore_tty()
             print(t("run_none", a=who), file=sys.stderr)
-            sys.exit(child.returncode if child.returncode >= 0 else 1)
+            finish(child.returncode if child.returncode >= 0 else 1)
         child.terminate()
         try:
             child.wait(timeout=10)
@@ -1931,85 +2064,589 @@ def cmd_run(args):
         print(t("run_switch", b=nb), file=sys.stderr)
         bk = copy_session(cfg, nxt, sid)
         if bk is False:
-            sys.exit(t("run_lost", d=short(cfg)))
+            finish(t("run_lost", d=short(cfg)))
         if bk:
             print(t("run_backup", b=nb, p=bk), file=sys.stderr)
         notify(t("n_title"), t("n_switch", a=who, b=nb))
+        run["switches"].append({"at": time.time(), "from": acct, "to": cli_account(nxt), "kind": hit["kind"]})
+        run.update(acct=cli_account(nxt), cfg=str(nxt))
+        save_json(runf, run)
         cfg, resume, prompt = nxt, True, t("run_prompt")
 
 
 # ---------- doctor
-def cmd_doctor(args):
-    if args.refresh:
-        refresh_official(args.config or ())
-        print()
-    issues = 0
+def doctor_items(extra=()):
+    """What doctor finds, for the terminal and the panel: section, whether it needs a look, text, and the fix the
+    panel can offer for it."""
+    items = []
+
+    def add(sec, text, warn=False, fix=None):
+        items.append({"sec": sec, "warn": warn, "text": text, "fix": fix})
+
     nm = names()
-    accts = accounts()
     timeline = signin_timeline()
     signed = timeline[-1][1] if timeline else None
-    print(t("d_desk"))
     if signed:
-        print(t("d_signed", a=nm.get(signed, signed[:8])))
+        add("desk", t("d_signed", a=nm.get(signed, signed[:8])))
     desk = {}
-    for a in accts:
+    for a in accounts():
         if a["sessions"]:
             desk.setdefault(a["acct"], a)
     for acct in desk:
         if not nm.get(acct):
-            print(t("d_unnamed", a=acct[:8]))
-            issues += 1
-    print(t("d_cli"))
+            add("desk", t("d_unnamed", a=acct[:8]), True, {"do": "name", "acct": acct})
     logins = load(LOGINS) or {}
-    plan_of = plans(args.config or ())
+    plan_of = plans(extra)
     found = sorted(p for p in HOME.glob(".claude-*") if p.is_dir())
-    found += [Path(os.path.expanduser(c)) for c in args.config or ()] + [HOME / ".claude"]
+    found += [Path(os.path.expanduser(c)) for c in extra] + [HOME / ".claude"]
     where = {}
     for c in dict.fromkeys(found):
         acct = cli_account(c)
         if not acct:
-            print(t("d_cli_none", d=short(c)))
+            add("cli", t("d_cli_none", d=short(c)))
             continue
         where.setdefault(acct, []).append(c)
         st = logins.get(str(c))
         s = (t("d_ok_at" if st.get("ok") else "d_bad_at", w=ago(time.time() - st.get("at", 0)))
              if isinstance(st, dict) else t("d_unchecked"))
         plan = f' ({plan_of[acct]})' if plan_of.get(acct) else ""
-        print(t("d_cli_row", d=short(c), a=nm.get(acct, acct[:8]), p=plan, s=s))
-    used = {}
-    for acct, dirs in where.items():
-        used[acct] = dirs[0]  # same order as cli_configs: a folder made for the account wins over ~/.claude
+        add("cli", t("d_cli_row", d=short(c), a=nm.get(acct, acct[:8]), p=plan, s=s))
+    for acct, dirs in where.items():  # dirs[0] is the one cli_configs puts first, so the one claude-move uses
         if len(dirs) > 1:
             stale = [d for d in dirs[1:] if not (logins.get(str(d)) or {}).get("ok", True)]
             if len(stale) == len(dirs) - 1:
-                print(t("d_stale", a=nm.get(acct, acct[:8]), d=", ".join(short(d) for d in stale), u=short(dirs[0])))
+                add("cli", t("d_stale", a=nm.get(acct, acct[:8]), d=", ".join(short(d) for d in stale), u=short(dirs[0])))
             else:
-                print(t("d_dup", a=nm.get(acct, acct[:8]), ds=", ".join(short(d) for d in dirs), u=short(dirs[0])))
-                issues += 1
+                add("cli", t("d_dup", a=nm.get(acct, acct[:8]), ds=", ".join(short(d) for d in dirs), u=short(dirs[0])), True)
     for acct in desk:
         if acct not in where:
-            print(t("d_no_cli", a=nm.get(acct, acct[:8]), n=nm.get(acct) or "name"))
-            issues += 1
-    for acct, c in used.items():
-        if (logins.get(str(c)) or {}).get("ok") is False:
+            add("cli", t("d_no_cli", a=nm.get(acct, acct[:8]), n=nm.get(acct) or "name"), True, {"do": "login", "acct": acct})
+    for acct, dirs in where.items():
+        c = dirs[0]
+        if (logins.get(str(c)) or {}).get("ok") is False or recorder_on(c):
             continue
-        sp = (DESKTOP_HOME if c == HOME / ".claude" else c) / "settings.json"
-        s = load(sp) or {}
-        line = s.get("statusLine") if isinstance(s, dict) else None
-        if not (isinstance(line, dict) and "watch record" in (line.get("command") or "")):
-            fix = "claude-move watch install" if c == HOME / ".claude" else f"CLAUDE_CONFIG_DIR={short(c)} claude-move watch install"
-            print(t("d_watch", d=short(c), c=fix))
-            issues += 1
-    print(t("d_misc"))
+        fix = "claude-move watch install" if c == HOME / ".claude" else f"CLAUDE_CONFIG_DIR={short(c)} claude-move watch install"
+        add("cli", t("d_watch", d=short(c), c=fix), True, {"do": "watch", "acct": acct})
     conf = notify_conf()
-    print(t("d_notify_on", l="/".join(map(str, conf["levels"]))) if conf["on"] else t("d_notify_off"))
+    add("misc", t("d_notify_on", l="/".join(map(str, conf["levels"]))) if conf["on"] else t("d_notify_off"))
     app = Path(os.path.expanduser("~/Applications")) / APP_NAME
     if sys.platform == "darwin" and app.exists():
         ok = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True).returncode == 0
-        print(t("d_app_ok" if ok else "d_app_bad"))
-        issues += 0 if ok else 1
+        add("misc", t("d_app_ok" if ok else "d_app_bad"), not ok)
+    return items
+
+
+def cmd_doctor(args):
+    if args.refresh:
+        refresh_official(args.config or ())
+        print()
+    items = doctor_items(args.config or ())
+    for sec, head in (("desk", "d_desk"), ("cli", "d_cli"), ("misc", "d_misc")):
+        print(t(head))
+        for it in items:
+            if it["sec"] == sec:
+                print(("  ! " if it["warn"] else "  ") + it["text"])
+    n = sum(1 for it in items if it["warn"])
     print()
-    print(t("d_count", n=issues) if issues else t("d_fine"))
+    print(t("d_count", n=n) if n else t("d_fine"))
+
+
+# ---------- panel: the fixed actions behind its buttons
+def captured(fn):
+    """Run fn, returning (ok, what it printed); a sys.exit message counts as a failure."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            fn()
+            ok = True
+        except SystemExit as e:
+            print(e.code if isinstance(e.code, str) else "")
+            ok = False
+    return ok, buf.getvalue()
+
+
+def with_app_closed(fn):
+    """Run fn with the desktop app quit first when it is open, and reopen it afterwards."""
+    was = app_running()
+    log = ""
+    if was:
+        log = t("p_quitting") + "\n"
+        if not quit_app():
+            return False, log + t("running")
+    ok, out = captured(fn)
+    if was:
+        out += t("p_opening") + "\n"
+        open_app()
+    return ok, log + out
+
+
+def claim_logins():
+    """Name accounts signed in through the panel's Add CLI login once their login shows up."""
+    pending = load(PENDING)
+    if not isinstance(pending, dict) or not pending:
+        return
+    nm = names()
+    left = {}
+    for d, p in pending.items():
+        acct = cli_account(Path(d))
+        if not acct:
+            if time.time() - (p.get("at") or 0) < 86400:
+                left[d] = p
+            continue
+        if p.get("label") and not nm.get(acct) and p.get("expect") in (None, acct):
+            nm[acct] = p["label"]
+            save_names(nm)
+    save_json(PENDING, left)
+
+
+def open_login(cfg, who):
+    """A Terminal window running the CLI's own `claude auth login` for this config folder."""
+    from shlex import quote
+    exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
+    lines = ["#!/bin/sh", "cd ~ || exit 1", f"export CLAUDE_CONFIG_DIR={quote(str(cfg))}",
+             f"echo {quote(t('l_head', d=short(cfg)))}", f"echo {quote(t('l_hint', a=who))}",
+             f"{quote(exe)} auth login --claudeai", f"echo {quote(t('l_done'))}"]
+    open_command(CONF / "term" / f"login-{cfg.name.lstrip('.')}.command", "\n".join(lines) + "\n")
+
+
+def check_update():
+    import urllib.request
+    url = os.environ.get("CLAUDE_MOVE_UPDATE_URL", "https://api.github.com/repos/Layla-NL/claude-move/releases/latest")
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "claude-move"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        d = json.loads(r.read().decode("utf-8"))
+    tag = str(d.get("tag_name") or "").lstrip("v")
+    ver = lambda v: tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+    return tag, d.get("html_url") or "", ver(tag) > ver(__version__)
+
+
+def panel_accounts(extra=()):
+    nm = names()
+    out = {}
+    for a in accounts():
+        if a["sessions"]:
+            e = out.setdefault(a["acct"], {"acct": a["acct"], "desk": True, "live": 0})
+            e["live"] += sum(1 for _, d in a["sessions"] if not d.get("isArchived"))
+    for c in cli_configs(extra):
+        e = out.setdefault(cli_account(c), {"acct": cli_account(c), "desk": False, "live": 0})
+        if "cli" not in e:
+            e.update(cli=short(c), cli_home=c.resolve() == DESKTOP_HOME.resolve(), recorder=recorder_on(c),
+                     settings=short(recorder_path(c)))
+    for e in out.values():
+        e["label"] = nm.get(e["acct"], "")
+        e["name"] = e["label"] or e["acct"][:8]
+    return sorted(out.values(), key=lambda e: e["name"].lower())
+
+
+def desk_sessions(acct):
+    hits = [a for a in accounts() if a["acct"] == acct]
+    if not hits:
+        return None
+    a = max(hits, key=lambda a: len(a["sessions"]))  # the same org `to` would pick
+    rows = [{"id": d["sessionId"], "title": d.get("title") or t("untitled"), "last": d.get("lastActivityAt") or 0,
+             "archived": bool(d.get("isArchived"))} for _, d in a["sessions"]]
+    return sorted(rows, key=lambda r: r["last"], reverse=True)
+
+
+def cli_sessions(cfg, limit=30):
+    files = []
+    for f in cfg.glob("projects/*/*.jsonl"):
+        try:
+            files.append((f.stat().st_mtime, f))
+        except OSError:
+            pass
+    home = project_dir_name(HOME) + "-"
+    return [{"id": f.stem, "project": f.parent.name[len(home):] if f.parent.name.startswith(home) else f.parent.name,
+             "title": first_prompt(f) or t("untitled"), "last": int(m * 1000),
+             "in_desk": (DESKTOP_HOME / "projects" / f.parent.name / f.name).exists()}
+            for m, f in sorted(files, reverse=True)[:limit]]
+
+
+def run_list():
+    nm = names()
+    out = []
+    files = sorted(RUNS.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:20] if RUNS.is_dir() else []
+    for f in files:
+        d = load(f)
+        if not isinstance(d, dict) or not d.get("sid"):
+            continue
+        tr = transcript_files(Path(d.get("cfg") or HOME / ".claude"), d["sid"])
+        main = [x for x in tr if x.name == f"{d['sid']}.jsonl"]
+        who = lambda a: nm.get(a or "", (a or "")[:8])
+        out.append({"sid": d["sid"], "title": first_prompt(main[0]) if main else "", "name": who(d.get("acct")),
+                    "started": d.get("started") or 0, "running": not d.get("ended") and pid_alive(d.get("pid")),
+                    "switches": [{"at": x.get("at") or 0, "from": who(x.get("from")), "to": who(x.get("to"))}
+                                 for x in d.get("switches") or []]})
+    return out
+
+
+SESSION_ID = re.compile(r"^(local_)?[0-9a-f-]{8,64}$")
+
+
+def panel_api(method, path, q, body, extra=()):
+    """Every button behind /api/: a fixed action, and every value from the page is checked against this Mac."""
+    name = path[len("/api/"):]
+    bad = (400, {"ok": False, "log": t("pt_bad")})
+    accts = panel_accounts(extra)
+    by = {a["acct"]: a for a in accts}
+    acct = str(body.get("acct") or q.get("acct") or "")
+    cfg = next((c for c in cli_configs(extra) if acct and cli_account(c) == acct), None)
+    if method == "GET":
+        if name == "accounts":
+            claim_logins()
+            return 200, {"accounts": panel_accounts(extra)}
+        if name == "sessions":
+            rows = desk_sessions(acct) if acct in by else None
+            return (200, {"sessions": rows}) if rows is not None else bad
+        if name == "backups":
+            out = []
+            nm = names()
+            for b, m in backups()[:30]:
+                if b.name.endswith("-before-undo"):
+                    continue
+                ok = isinstance(m, dict) and m.get("version") == 1
+                who = nm.get(m.get("account", ""), m.get("account", "")[:8]) if ok else ""
+                text = t("bk_line", n=b.name, w=time.strftime("%m-%d %H:%M", time.localtime(m.get("created", 0))),
+                         c=len(m.get("replaced", [])) + len(m.get("added", [])), a=who) if ok else t("bk_old", n=b.name)
+                out.append({"name": b.name, "ok": ok, "undone": bool(ok and m.get("undone")), "account": who, "text": text})
+            return 200, {"backups": out}
+        if name == "runs":
+            return 200, {"runs": run_list()}
+        if name == "cli-sessions":
+            if not cfg or cfg.resolve() == DESKTOP_HOME.resolve():
+                return bad
+            return 200, {"sessions": cli_sessions(cfg)}
+        if name == "doctor":
+            return 200, {"items": doctor_items(extra)}
+        if name == "notify":
+            return 200, notify_conf()
+        if name == "update":
+            try:
+                tag, url, newer = check_update()
+            except (OSError, ValueError) as e:
+                return 200, {"ok": False, "log": t("pt_update_fail", e=e)}
+            log = t("pt_update_new", v=tag, c=__version__, u=url) if newer else t("pt_update_none", c=__version__, v=tag or "-")
+            return 200, {"ok": True, "newer": newer, "url": url if newer else "", "log": log}
+        return 404, {}
+    if name == "move":
+        src, dst = str(body.get("from") or ""), str(body.get("to") or "")
+        rng = str(body.get("range") or "3")
+        if src not in by or dst not in by or not by[src]["desk"] or not by[dst]["desk"] or rng not in ("3", "7", "all", "pick"):
+            return bad
+        only = None
+        if rng == "pick":
+            ids = {r["id"] for r in desk_sessions(src) or []}
+            only = [str(x) for x in body.get("only") or [] if str(x) in ids]
+            if not only:
+                return 200, {"ok": False, "log": t("nothing")}
+        ns = argparse.Namespace(target=dst, source=src, days=float(rng) if rng in ("3", "7") else 3, all=rng == "all",
+                                only=only, dry_run=bool(body.get("dry")))
+        ok, log = captured(lambda: cmd_to(ns)) if ns.dry_run else with_app_closed(lambda: cmd_to(ns))
+        return 200, {"ok": ok, "log": log}
+    if name == "undo":
+        bk = str(body.get("name") or "")
+        if bk not in {b.name for b, m in backups() if isinstance(m, dict) and m.get("version") == 1}:
+            return bad
+        ns = argparse.Namespace(list=False, backup=bk, dry_run=bool(body.get("dry")))
+        ok, log = captured(lambda: cmd_undo(ns)) if ns.dry_run else with_app_closed(lambda: cmd_undo(ns))
+        return 200, {"ok": ok, "log": log}
+    if name == "name":
+        label = str(body.get("label") or "").strip()
+        if acct not in by:
+            return bad
+        if len(label) > 32 or any(ord(ch) < 32 for ch in label):
+            return 200, {"ok": False, "log": t("pt_label_bad")}
+        nm = names()
+        if label:
+            nm[acct] = label
+        else:
+            nm.pop(acct, None)
+        save_names(nm)
+        return 200, {"ok": True, "log": t("pt_saved")}
+    if name == "watch":
+        if not cfg:
+            return bad
+        ok, log = captured(lambda: watch_set(recorder_path(cfg), bool(body.get("on"))))
+        return 200, {"ok": ok, "log": log}
+    if name == "login":
+        nm = names()
+        if acct:
+            if acct not in by or not by[acct]["desk"]:
+                return bad
+            label = nm.get(acct, "")
+            folder = re.sub(r"[^A-Za-z0-9-]", "", label)[:24] or acct[:8]
+            who, new_label = label or acct[:8], None
+        else:
+            folder = str(body.get("name") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,24}", folder):
+                return 200, {"ok": False, "log": t("pt_login_bad")}
+            who, new_label = t("pt_login_any"), folder
+        target = HOME / f".claude-{folder}"
+        if cli_account(target):
+            return 200, {"ok": False, "log": t("pt_login_exists", d=short(target))}
+        target.mkdir(exist_ok=True)
+        pending = load(PENDING) or {}
+        pending[str(target)] = {"label": new_label, "expect": acct or None, "at": time.time()}
+        save_json(PENDING, pending)
+        open_login(target, who)
+        return 200, {"ok": True, "log": t("pt_login_opened", d=short(target), a=who)}
+    if name == "notify":
+        if body.get("test"):
+            notify(t("n_title"), t("n_test"))
+            return 200, {"ok": True, "log": t("n_sent")}
+        conf = notify_conf()
+        try:
+            levels = sorted({int(x) for x in str(body.get("levels") or "").split(",") if x.strip()})
+        except ValueError:
+            levels = []
+        if not levels or not all(1 <= x <= 100 for x in levels):
+            return 200, {"ok": False, "log": t("pt_levels_bad")}
+        conf.update(on=bool(body.get("on")), levels=levels)
+        save_json(NOTIFY, conf)
+        return 200, {"ok": True, "log": t("n_on", l="/".join(map(str, levels))) if conf["on"] else t("n_off")}
+    if name == "import":
+        if not cfg or cfg.resolve() == DESKTOP_HOME.resolve():
+            return bad
+        lines, n = [], 0
+        for sid in [str(x) for x in body.get("ids") or [] if SESSION_ID.match(str(x))]:
+            f = next(iter(cfg.glob(f"projects/*/{sid}.jsonl")), None)
+            if not f:
+                continue
+            w = time.strftime("%m-%d %H:%M", time.localtime(f.stat().st_mtime))
+            added = import_one(f, DESKTOP_HOME)
+            n += added
+            lines.append(t("imp_add" if added else "imp_skip", i=sid, w=w, t=first_prompt(f)))
+        return 200, {"ok": True, "log": "\n".join(lines + [t("imp_done", n=n) if lines else t("nothing")])}
+    if name == "doctor":
+        _, log = captured(lambda: refresh_official(extra))
+        return 200, {"ok": True, "log": log, "items": doctor_items(extra)}
+    return 404, {}
+
+
+TOOLS_CSS = """
+.toolbox{margin-top:18px;display:grid;gap:10px}
+.toolbox details{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px}
+.toolbox summary{cursor:pointer;font-weight:600}
+.toolbox .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
+.toolbox select,.toolbox input[type=text]{font:inherit;font-size:13px;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);max-width:100%}
+.toolbox .ghost,.tools .ghost{margin-top:0}
+.list{max-height:340px;overflow:auto;margin:8px 0}
+.item{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.item:last-child{border-bottom:0} .item.warn{color:var(--cool)} .dim{color:var(--dim)} .sub-item{padding-left:18px;color:var(--dim)}
+"""
+
+TOOLS_JS = r"""
+const TT = __TT__;
+const $ = id => document.getElementById(id);
+const el = (tag, props, ...kids) => { const e = document.createElement(tag); Object.assign(e, props || {}); kids.forEach(k => e.append(k)); return e; };
+const say = (id, text) => { const p = $(id); p.hidden = false; p.textContent = text; };
+const pad = n => String(n).padStart(2, "0");
+const day = ms => { const d = new Date(ms); return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+const get = (name, qs) => api("/api/" + name + (qs ? "?" + new URLSearchParams(qs) : ""));
+const post = (name, body) => api("/api/" + name, body || {});
+const reload = () => {
+  try { sessionStorage.setItem("open", JSON.stringify([...document.querySelectorAll("details[open]")].map(d => d.id))); } catch (e) {}
+  location.reload();
+};
+let ACCTS = null;
+const accts = async () => ACCTS || (ACCTS = (await get("accounts")).accounts);
+function fill(sel, list, pick) {
+  if (sel.options.length) return;
+  list.forEach(a => sel.append(el("option", {value: a.acct, textContent: a.name})));
+  if (pick && list.some(a => a.acct === pick)) sel.value = pick;
+}
+const empty = (box, text) => box.append(el("p", {className: "dim", textContent: text}));
+
+async function rename(acct) {
+  const a = (await accts()).find(x => x.acct === acct);
+  const v = prompt(fmt(TT.pt_rename_ask, {a: a ? a.name : acct.slice(0, 8)}), a ? a.label : "");
+  if (v === null) return;
+  const r = await post("name", {acct, label: v});
+  if (!r.ok) return alert(r.log);
+  reload();
+}
+async function recorder(acct, on) {
+  const a = (await accts()).find(x => x.acct === acct);
+  if (on && !confirm(fmt(TT.pt_rec_confirm, {p: a ? a.settings : ""}))) return;
+  const r = await post("watch", {acct, on});
+  alert(r.log);
+  reload();
+}
+async function login(body) {
+  if (!body.acct) {
+    const v = prompt(TT.pt_login_ask, "");
+    if (!v) return;
+    body = {name: v};
+  }
+  alert((await post("login", body)).log);
+}
+async function fix(f) {
+  if (f.do === "name") return rename(f.acct);
+  if (f.do === "watch") return recorder(f.acct, true);
+  if (f.do === "login") return login({acct: f.acct});
+}
+document.querySelectorAll("[data-rename]").forEach(b => b.onclick = () => rename(b.dataset.rename));
+document.querySelectorAll("[data-rec]").forEach(b => b.onclick = () => recorder(b.dataset.rec, b.dataset.on !== "1"));
+document.querySelectorAll("[data-login]").forEach(b => b.onclick = () => login({acct: b.dataset.login}));
+
+async function loadMove() {
+  const a = (await accts()).filter(x => x.desk);
+  fill($("mv-from"), a, state && state.source && state.source.acct);
+  fill($("mv-to"), a, state && state.signed && state.signed.acct);
+  await loadMoveList();
+}
+async function loadMoveList() {
+  const box = $("mv-list");
+  box.innerHTML = "";
+  if ($("mv-range").value !== "pick") return;
+  const r = await get("sessions", {acct: $("mv-from").value});
+  (r.sessions || []).filter(s => !s.archived).forEach(s => box.append(
+    el("label", {className: "item"}, el("input", {type: "checkbox", value: s.id}), day(s.last) + "  " + s.title)));
+}
+$("mv-from").onchange = loadMoveList;
+$("mv-range").onchange = loadMoveList;
+const moveBody = dry => ({from: $("mv-from").value, to: $("mv-to").value, range: $("mv-range").value, dry,
+  only: [...document.querySelectorAll("#mv-list input:checked")].map(i => i.value)});
+$("mv-preview").onclick = async () => { say("mv-log", TT.p_working); say("mv-log", (await post("move", moveBody(true))).log); };
+$("mv-go").onclick = async () => {
+  if (state && state.running && !confirm(TT.pt_move_confirm)) return;
+  say("mv-log", TT.p_working);
+  say("mv-log", (await post("move", moveBody(false))).log);
+};
+
+async function loadUndo() {
+  const box = $("undo-list");
+  const r = await get("backups");
+  box.innerHTML = "";
+  if (!r.backups.length) empty(box, TT.no_backups);
+  r.backups.forEach(b => {
+    const row = el("div", {className: "item" + (b.ok && !b.undone ? "" : " dim")}, b.text + (b.undone ? " · " + TT.pt_undone : ""));
+    if (b.ok && !b.undone) {
+      const btn = el("button", {className: "ghost", textContent: TT.pt_undo_btn});
+      btn.onclick = async () => {
+        if (!confirm(fmt(TT.pt_undo_confirm, {a: b.account}))) return;
+        say("undo-log", TT.p_working);
+        say("undo-log", (await post("undo", {name: b.name})).log);
+        loadUndo();
+      };
+      row.append(btn);
+    }
+    box.append(row);
+  });
+}
+
+async function loadSess() {
+  fill($("ss-acct"), (await accts()).filter(x => x.desk), state && state.signed && state.signed.acct);
+  const r = await get("sessions", {acct: $("ss-acct").value});
+  const box = $("ss-list");
+  box.innerHTML = "";
+  (r.sessions || []).forEach(x => box.append(el("div", {className: "item" + (x.archived ? " dim" : "")},
+    day(x.last) + "  " + x.title + (x.archived ? " · " + TT.pt_archived : ""))));
+}
+$("ss-acct").onchange = loadSess;
+
+async function loadImp() {
+  fill($("im-acct"), (await accts()).filter(x => x.cli && !x.cli_home));
+  const box = $("im-list");
+  box.innerHTML = "";
+  if (!$("im-acct").value) return;
+  const r = await get("cli-sessions", {acct: $("im-acct").value});
+  (r.sessions || []).forEach(x => box.append(el("label", {className: "item" + (x.in_desk ? " dim" : "")},
+    el("input", {type: "checkbox", value: x.id, disabled: x.in_desk}),
+    day(x.last) + "  " + x.project + "  " + x.title + (x.in_desk ? " · " + TT.pt_in_desk : ""))));
+}
+$("im-acct").onchange = loadImp;
+$("im-go").onclick = async () => {
+  const ids = [...document.querySelectorAll("#im-list input:checked")].map(i => i.value);
+  say("im-log", TT.p_working);
+  say("im-log", (await post("import", {acct: $("im-acct").value, ids})).log);
+  loadImp();
+};
+
+async function loadRuns() {
+  const box = $("runs-list");
+  const r = await get("runs");
+  box.innerHTML = "";
+  if (!r.runs.length) empty(box, TT.pt_runs_none);
+  r.runs.forEach(x => {
+    box.append(el("div", {className: "item" + (x.running ? "" : " dim")}, fmt(TT.pt_run_line,
+      {s: x.title || x.sid.slice(0, 8), a: x.name, n: x.switches.length, w: day(x.started * 1000)}) + " · " + (x.running ? TT.pt_running : TT.pt_ended)));
+    x.switches.forEach(w => box.append(el("div", {className: "item sub-item"}, fmt(TT.pt_run_switch, {w: day(w.at * 1000), a: w.from, b: w.to}))));
+  });
+}
+
+function showDoctor(items) {
+  const box = $("doc-list");
+  box.innerHTML = "";
+  items.forEach(it => {
+    const row = el("div", {className: "item" + (it.warn ? " warn" : "")}, (it.warn ? "! " : "") + it.text);
+    if (it.fix) {
+      const b = el("button", {className: "ghost", textContent: TT.pt_fix});
+      b.onclick = () => fix(it.fix);
+      row.append(b);
+    }
+    box.append(row);
+  });
+}
+const loadDoc = async () => showDoctor((await get("doctor")).items);
+$("doc-refresh").onclick = async () => {
+  say("doc-log", TT.p_working);
+  const r = await post("doctor", {});
+  say("doc-log", r.log);
+  showDoctor(r.items);
+};
+$("doc-login").onclick = () => login({});
+
+async function loadNotify() {
+  const r = await get("notify");
+  $("nt-on").checked = r.on;
+  $("nt-levels").value = r.levels.join(",");
+}
+$("nt-save").onclick = async () => { $("nt-msg").textContent = (await post("notify", {on: $("nt-on").checked, levels: $("nt-levels").value})).log; };
+$("nt-test").onclick = async () => { $("nt-msg").textContent = (await post("notify", {test: true})).log; };
+$("up-go").onclick = async () => { $("up-msg").textContent = TT.p_working; $("up-msg").textContent = (await get("update")).log; };
+
+const loaders = {"t-move": loadMove, "t-undo": loadUndo, "t-sess": loadSess, "t-imp": loadImp, "t-runs": loadRuns,
+  "t-doc": loadDoc, "t-notify": loadNotify};
+Object.entries(loaders).forEach(([id, fn]) => $(id).addEventListener("toggle", () => { if ($(id).open) fn(); }));
+try { JSON.parse(sessionStorage.getItem("open") || "[]").forEach(id => { if ($(id)) $(id).open = true; }); } catch (e) {}
+"""
+
+TOOLS_KEYS = ("p_working", "no_backups", "pt_move_confirm", "pt_undo_btn", "pt_undo_confirm", "pt_undone", "pt_archived",
+              "pt_in_desk", "pt_runs_none", "pt_run_line", "pt_run_switch", "pt_running", "pt_ended", "pt_fix",
+              "pt_rename_ask", "pt_rec_confirm", "pt_login_ask")
+
+
+def tools_html():
+    from html import escape
+    e = lambda k: escape(t(k))
+    opts = "".join(f'<option value="{v}">{e(k)}</option>' for v, k in (("3", "pt_r3"), ("7", "pt_r7"), ("all", "pt_rall"), ("pick", "pt_rpick")))
+    return f'''<div class="toolbox">
+<details id="t-move"><summary>{e("pt_move")}</summary>
+<div class="row">{e("pt_from")} <select id="mv-from"></select> {e("pt_to")} <select id="mv-to"></select> <select id="mv-range">{opts}</select></div>
+<div class="list" id="mv-list"></div>
+<div class="row"><button class="ghost" id="mv-preview">{e("pt_preview")}</button><button id="mv-go">{e("pt_do_move")}</button></div>
+<pre class="log" id="mv-log" hidden></pre></details>
+<details id="t-undo"><summary>{e("pt_undo")}</summary><div class="list" id="undo-list"></div><pre class="log" id="undo-log" hidden></pre></details>
+<details id="t-sess"><summary>{e("pt_sessions")}</summary><div class="row"><select id="ss-acct"></select></div><div class="list" id="ss-list"></div></details>
+<details id="t-imp"><summary>{e("pt_import")}</summary><div class="row"><select id="im-acct"></select></div><div class="list" id="im-list"></div>
+<div class="row"><button id="im-go">{e("pt_import_btn")}</button></div><pre class="log" id="im-log" hidden></pre></details>
+<details id="t-runs"><summary>{e("pt_runs")}</summary><div class="list" id="runs-list"></div></details>
+<details id="t-doc"><summary>{e("pt_doctor")}</summary><div class="list" id="doc-list"></div>
+<div class="row"><button class="ghost" id="doc-refresh">{e("pt_doctor_refresh")}</button><button class="ghost" id="doc-login">{e("pt_login_new")}</button></div>
+<pre class="log" id="doc-log" hidden></pre></details>
+<details id="t-notify"><summary>{e("pt_notify")}</summary><div class="row"><label><input type="checkbox" id="nt-on"> {e("pt_notify_on")}</label>
+<input type="text" id="nt-levels" size="10"> %<button class="ghost" id="nt-save">{e("pt_save")}</button><button class="ghost" id="nt-test">{e("pt_test")}</button></div>
+<p class="dim" id="nt-msg"></p></details>
+<details id="t-upd"><summary>{e("pt_update")}</summary><div class="row"><button class="ghost" id="up-go">{e("pt_update_btn")}</button></div>
+<p class="dim" id="up-msg"></p></details>
+</div>'''
+
+
+def tools_js():
+    return TOOLS_JS.replace("__TT__", json.dumps({k: t(k) for k in TOOLS_KEYS}, ensure_ascii=False))
 
 
 def main(argv=None):
