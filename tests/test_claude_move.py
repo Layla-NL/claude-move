@@ -8,6 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
+FIVE_H = 5 * 3600
 TOOL = Path(__file__).resolve().parents[1] / "claude-move"
 NOW = int(time.time() * 1000)
 
@@ -399,6 +400,10 @@ class Panel(unittest.TestCase):
         self.assertIn(f"CLAUDE_CONFIG_DIR={c}", (self.home / ".config/claude-move/term/claude-second.command").read_text())
         self.assertEqual(self.call("/terminal", {"acct": self.b, "rc": True})[0], 200)
         self.assertIn("--remote-control bbbbbbbb", (self.home / ".config/claude-move/term/claude-second-rc.command").read_text())
+        self.assertIn('id="auto"', page)
+        self.assertEqual(self.call("/terminal", {"acct": self.b, "auto": True})[0], 200)
+        auto = (self.home / ".config/claude-move/term/claude-second-auto.command").read_text()
+        self.assertIn(f"run --config {c} {self.b}", auto)
 
     def test_usage_text_fallback(self):
         import importlib.machinery, importlib.util
@@ -451,8 +456,112 @@ class PanelLifecycle(unittest.TestCase):
         self.assertEqual(v.returncode, 0, v.stderr)
 
 
+class Run(unittest.TestCase):
+    """run: at a usage limit the session is copied to the freest CLI login and resumed there; notify; doctor."""
+    setUp, tearDown = Usage.setUp, Usage.tearDown
+    run_tool = Usage.run_tool
+
+    def logins(self):
+        a_cfg, b_cfg = self.home / ".claude-first", self.home / ".claude-second"
+        for c, acct in ((a_cfg, self.a), (b_cfg, self.b)):
+            c.mkdir()
+            (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": acct}}))
+        self.run_tool("name", "aaaa", "first")
+        self.run_tool("name", "bbbb", "second")
+        return a_cfg, b_cfg
+
+    def test_run_moves_session_at_limit_and_resumes(self):
+        a_cfg, b_cfg = self.logins()
+        soon = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.now + 7200))
+        report = {"type": "assistant", "usage_report": {"rate_limits": {"limits": [
+            {"kind": "weekly_all", "percent": 41, "resets_at": soon}]}}}
+        hit = limit_hit("x", self.now, "five_hour", int(self.now + 3600), entry="cli")
+        argv = self.home / "argv"
+        stub = self.home / "claude"
+        # the stub claude: /usage answers for both; in the first login it hits the limit and waits like the TUI does
+        stub.write_text("#!/bin/sh\n"
+                        "for a in \"$@\"; do case \"$prev\" in --session-id|--resume) SID=\"$a\";; esac; prev=\"$a\"; done\n"
+                        f"case \" $* \" in *\" -p \"*) echo '{json.dumps(report)}'; exit 0;; esac\n"
+                        "D=\"$CLAUDE_CONFIG_DIR/projects/-p\"; mkdir -p \"$D\"\n"
+                        f"if [ \"$CLAUDE_CONFIG_DIR\" = \"{a_cfg}\" ]; then echo '{{\"type\":\"user\"}}' >> \"$D/$SID.jsonl\"; "
+                        f"echo '{json.dumps(hit)}' >> \"$D/$SID.jsonl\"; exec sleep 30; fi\n"
+                        f"printf '%s\\n' \"$@\" > {argv}; echo '{{\"type\":\"user\",\"b\":1}}' >> \"$D/$SID.jsonl\"; exit 0\n")
+        stub.chmod(0o755)
+        sent = self.home / "sent"
+        r = self.run_tool("run", "first", "--rc", CLAUDE_MOVE_CLAUDE=str(stub), CLAUDE_MOVE_POLL="0.1",
+                          CLAUDE_MOVE_NOTIFY_CMD=f"cat >> {sent}")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("first hit its 5-hour limit", r.stderr)
+        self.assertIn("Moving this session to second", r.stderr)
+        args = argv.read_text().splitlines()
+        sid = args[args.index("--resume") + 1]
+        self.assertEqual(args[args.index("--remote-control") + 1], "second")
+        self.assertIn("Continue where you left off", args[-1])
+        moved = (b_cfg / "projects/-p" / f"{sid}.jsonl").read_text().splitlines()
+        self.assertEqual(len(moved), 3)  # first's two lines, then second's own
+        self.assertEqual(len((a_cfg / "projects/-p" / f"{sid}.jsonl").read_text().splitlines()), 2)  # source untouched
+        self.assertIn("first hit its limit; the session moved to second", sent.read_text())
+
+    def test_run_stays_when_no_other_account(self):
+        a_cfg, _ = self.logins()
+        hit = limit_hit("x", self.now, "seven_day", int(self.now + 3600), entry="cli")
+        stub = self.home / "claude"
+        stub.write_text("#!/bin/sh\n"
+                        "for a in \"$@\"; do case \"$prev\" in --session-id) SID=\"$a\";; esac; prev=\"$a\"; done\n"
+                        "case \" $* \" in *\" -p \"*) echo 'Not logged in'; exit 0;; esac\n"
+                        "D=\"$CLAUDE_CONFIG_DIR/projects/-p\"; mkdir -p \"$D\"\n"
+                        f"echo '{json.dumps(hit)}' >> \"$D/$SID.jsonl\"; sleep 1; exit 3\n")
+        stub.chmod(0o755)
+        r = self.run_tool("run", "first", CLAUDE_MOVE_CLAUDE=str(stub), CLAUDE_MOVE_POLL="0.1", CLAUDE_MOVE_NOTIFY_CMD="true")
+        self.assertEqual(r.returncode, 3)  # claude was left alone and its exit code passed through
+        self.assertIn("No other account to move to", r.stderr)
+
+    def test_notify_once_per_level_and_window(self):
+        sent = self.home / "sent"
+        cfg = self.home / ".claude-second"
+        cfg.mkdir()
+        (cfg / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
+        reset = int(self.now + 3600)
+
+        def record(pct, at=reset):
+            line = json.dumps({"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": at}}})
+            return self.run_tool("watch", "record", stdin=line, CLAUDE_CONFIG_DIR=str(cfg), CLAUDE_MOVE_NOTIFY_CMD=f"cat >> {sent}")
+
+        record(50)
+        self.assertFalse(sent.exists())
+        record(91)
+        record(92)
+        self.assertEqual(sent.read_text().count("5h limit 9"), 1)
+        record(96)
+        record(10, reset + FIVE_H)  # next window: starts over, nothing to say yet
+        record(80, reset + FIVE_H)
+        self.assertEqual([ln for ln in sent.read_text().splitlines() if "limit" in ln],
+                         [f"bbbbbbbb: 5h limit 91% used · resets {fmt(reset)}", f"bbbbbbbb: 5h limit 96% used · resets {fmt(reset)}",
+                          f"bbbbbbbb: 5h limit 80% used · resets {fmt(reset + FIVE_H)}"])
+        self.assertIn("off", self.run_tool("notify", "off").stdout)
+        record(99, reset + FIVE_H)
+        self.assertEqual(sent.read_text().count("limit"), 3)
+        self.assertIn("80/95", self.run_tool("notify", "on", "--levels", "95,80").stdout)
+
+    def test_doctor(self):
+        cfg = self.home / ".claude-second"
+        cfg.mkdir()
+        (cfg / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
+        (self.home / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))  # stale profile
+        r = self.run_tool("doctor")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("bbbbbbbb shows up in ~/.claude-second, ~/.claude; claude-move uses ~/.claude-second", r.stdout)
+        self.assertIn("aaaaaaaa has desktop sessions but no CLI login", r.stdout)
+        self.assertIn("no status line recorder in ~/.claude-second", r.stdout)
+        self.assertIn("thing(s) to look at", r.stdout)
+
+
+def fmt(ts):
+    return time.strftime("%m-%d %H:%M", time.localtime(ts))
+
+
 class Help(unittest.TestCase):
     def test_every_help_renders(self):
-        for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["term"], ["watch"]):
+        for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["term"], ["run"], ["notify"], ["doctor"], ["watch"]):
             r = subprocess.run([sys.executable, str(TOOL), *args, "--help"], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, (args, r.stderr[-300:]))

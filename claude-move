@@ -162,6 +162,54 @@ T = {
     "p_no_folder": ("That account has no session folder yet: open the Code tab once in the desktop app.", "这个号还没有会话目录：先在桌面 App 里打开一次 Code 页。"),
     "p_quitting": ("Quitting the desktop app…", "正在退出桌面 App……"),
     "p_opening": ("Reopening the desktop app…", "正在重新打开桌面 App……"),
+    "p_auto": ("Terminals switch account and go on when they hit a usage limit (claude-move run)",
+               "打开的终端撞到额度上限时自动换号接着干（claude-move run）"),
+    "run_on": ("claude-move run: {a} ({c}). At a usage limit it moves this session to the account with the most left and goes on.",
+               "claude-move run：用 {a}（{c}）。撞到额度上限时，把这个会话搬到剩得最多的号接着干。"),
+    "run_hit": ("{a} hit its {k} limit (back at {w}).", "{a} 的{k}额度用完了（{w} 恢复）。"),
+    "run_pick": ("Checking which account has the most left…", "看看哪个号剩得最多……"),
+    "run_switch": ("Moving this session to {b} and resuming it…", "把这个会话搬到 {b}，接着做……"),
+    "run_none": ("No other account to move to (each is cooling or has no CLI login); staying on {a}.",
+                 "没有能换的号（都在冷却或没有命令行登录），先留在 {a}。"),
+    "run_backup": ("{b}'s earlier copy of this session was saved to {p}", "{b} 那边这个会话原来的版本另存到了 {p}"),
+    "run_prompt": ("The previous account hit its usage limit, so this session moved to another account. Continue where you left off.",
+                   "上一个账号额度用完了，会话已换到另一个号。请从刚才停下的地方接着做。"),
+    "run_lost": ("This session's transcript was not found in {d}; cannot move it.", "在 {d} 里没找到这个会话的记录，没法搬。"),
+    "n_title": ("Claude Move", "Claude Move"),
+    "n_level": ("{a}: {k} limit {p}% used", "{a}：{k}额度已用 {p}%"),
+    "n_reset": ("resets {w}", "{w} 重置"),
+    "n_switch": ("{a} hit its limit; the session moved to {b}", "{a} 额度用完，会话已换到 {b} 接着干"),
+    "n_none": ("{a} hit its limit and no other account is free", "{a} 额度用完，别的号也都不能用"),
+    "n_on": ("Notifications on at {l}%. They are checked whenever the official % updates: the CLI status line recorder (watch install) or usage --refresh.",
+             "通知已开，阈值 {l}%。官方百分比一更新就检查：命令行状态栏记录器（watch install）或 usage --refresh。"),
+    "n_off": ("Notifications off.", "通知已关。"),
+    "n_test": ("Test notification from claude-move", "claude-move 的测试通知"),
+    "n_sent": ("Sent a test notification. If none showed up, allow notifications for Script Editor in System Settings > Notifications.",
+               "已发一条测试通知。没看到的话，到 系统设置 → 通知 里允许“脚本编辑器”。"),
+    "d_desk": ("Desktop app accounts:", "桌面 App 的账号："),
+    "d_signed": ("  signed in now: {a}", "  现在登录的：{a}"),
+    "d_unnamed": ("  ! {a} has no label: claude-move name {a} <label>", "  ! {a} 还没起名字：claude-move name {a} <名字>"),
+    "d_cli": ("CLI logins:", "命令行登录："),
+    "d_cli_row": ("  {d}: {a}{p} · {s}", "  {d}：{a}{p} · {s}"),
+    "d_cli_none": ("  {d}: not signed in", "  {d}：没登录"),
+    "d_ok_at": ("/usage answered {w} ago", "{w}前 /usage 正常"),
+    "d_bad_at": ("no plan usage at the last check {w} ago", "{w}前检查时没有套餐额度"),
+    "d_unchecked": ("not checked yet (doctor --refresh)", "还没检查过（doctor --refresh）"),
+    "d_dup": ("  ! {a} shows up in {ds}; claude-move uses {u}.", "  ! {a} 同时出现在 {ds}；claude-move 用的是 {u}。"),
+    "d_stale": ("  {a} also has a cached profile in {d}, which had no plan usage at the last check; harmless, {u} is used.",
+                "  {a} 在 {d} 里还留着旧的账号资料（上次检查没有套餐额度），不影响，用的是 {u}。"),
+    "d_no_cli": ("  ! {a} has desktop sessions but no CLI login, so Open in Terminal and run cannot use it: CLAUDE_CONFIG_DIR=~/.claude-{n} claude, then /login",
+                 "  ! {a} 有桌面会话，但没有命令行登录，打开终端和自动续接都用不了它：CLAUDE_CONFIG_DIR=~/.claude-{n} claude，再输入 /login"),
+    "d_watch": ("  ! no status line recorder in {d}, so its live % and notifications only update on usage --refresh: {c}",
+                "  ! {d} 没装状态栏记录器，它的实时百分比和通知只在 usage --refresh 时更新：{c}"),
+    "d_misc": ("Other:", "其他："),
+    "d_notify_on": ("  notifications: on at {l}%", "  通知：开，阈值 {l}%"),
+    "d_notify_off": ("  notifications: off (claude-move notify on)", "  通知：关（claude-move notify on）"),
+    "d_app_ok": ("  Claude Move.app: signature OK", "  Claude Move.app：签名正常"),
+    "d_app_bad": ("  ! Claude Move.app: signature broken, macOS may call it damaged: claude-move app install",
+                  "  ! Claude Move.app：签名坏了，macOS 可能说它“已损坏”：claude-move app install"),
+    "d_fine": ("No problems found.", "没发现问题。"),
+    "d_count": ("{n} thing(s) to look at.", "有 {n} 处要看一下。"),
     "u_head": ("Quota by account", "各账号额度"),
     "u_back": ("{k} limit used up · back at {w}", "{k}额度用完 · {w} 恢复"),
     "u_off_head": ("Official, fetched {a} ago", "官方数据，{a}前取得"),
@@ -498,6 +546,10 @@ LOGS = Path(os.environ.get("CLAUDE_MOVE_LOGS", str(HOME / "Library/Logs/Claude")
 LIMITS = CONF / "limits.json"
 PANEL = CONF / "panel.json"
 WATCH = CONF / "watch.json"
+LOGINS = CONF / "logins.json"
+NOTIFY = CONF / "notify.json"
+NOTIFIED = CONF / "notified.json"
+LEVELS = (75, 90, 95)
 KEEP_DAYS = 35
 WEEK, FIVE_H = 7 * 86400, 5 * 3600
 # $ per million input tokens; output, cache writes and cache reads scale from it as in the public price list
@@ -794,17 +846,23 @@ def recent_cwd(cfg):
     return Path(cwd) if cwd and Path(cwd).is_dir() else None
 
 
-def open_terminal(cfg, rc=False):
+def open_terminal(cfg, rc=False, auto=False):
     """A new Terminal window running `claude` with this config folder, so the CLI uses that folder's own login, in the
     account's last project folder; with rc, as a Remote Control session named after the account so the phone app
-    can join it. It writes a small .command file and lets macOS open it: no Automation permission, no credentials."""
+    can join it; with auto, through `claude-move run`, which changes account at a usage limit.
+    It writes a small .command file and lets macOS open it: no Automation permission, no credentials."""
     from shlex import quote
     exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
     env = "unset CLAUDE_CONFIG_DIR\n" if cfg == HOME / ".claude" else f"export CLAUDE_CONFIG_DIR={quote(str(cfg))}\n"
     cwd = recent_cwd(cfg)
     go = f"cd {quote(str(cwd))} 2>/dev/null || cd ~ || exit 1\n" if cwd else "cd ~ || exit 1\n"
-    run = f"exec {quote(exe)}" + (f" --remote-control {quote(rc_name(cli_account(cfg)))}" if rc else "")
-    script = CONF / "term" / (cfg.name.lstrip(".") + ("-rc" if rc else "") + ".command")
+    if auto:
+        env = f"export CLAUDE_MOVE_LANG={'zh' if ZH else 'en'}\n"
+        run = (f"exec {quote(sys.executable)} {quote(str(Path(__file__).resolve()))} run --config {quote(str(cfg))} "
+               f"{quote(cli_account(cfg))}" + (" --rc" if rc else ""))
+    else:
+        run = f"exec {quote(exe)}" + (f" --remote-control {quote(rc_name(cli_account(cfg)))}" if rc else "")
+    script = CONF / "term" / (cfg.name.lstrip(".") + ("-rc" if rc else "") + ("-auto" if auto else "") + ".command")
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(f"#!/bin/sh\n{go}{env}{run}\n")
     script.chmod(0o700)
@@ -818,9 +876,10 @@ def cmd_term(args):
     if not cfg:
         sys.exit(t("t_none", t=args.account))
     acct = cli_account(cfg)
-    cwd = open_terminal(cfg, args.rc)
-    shown = "~/" + str(cwd.relative_to(HOME)) if cwd and str(cwd).startswith(str(HOME) + os.sep) else str(cwd or "~")
-    print(t("t_open", a=names().get(acct, acct[:8]), d=shown, c=rc_command(cfg) if args.rc else cli_command(cfg)))
+    cwd = open_terminal(cfg, args.rc, args.auto)
+    cmd = f"claude-move run {rc_name(acct)}" + (" --rc" if args.rc else "") if args.auto else (
+        rc_command(cfg) if args.rc else cli_command(cfg))
+    print(t("t_open", a=names().get(acct, acct[:8]), d=short(cwd) if cwd else "~", c=cmd))
 
 
 def cli_configs(extra=()):
@@ -920,30 +979,55 @@ def refresh_official(extra=()):
         print(t("r_none"))
         return
     print(t("r_scan"))
-    cur = load(LIMITS) or {}
     for c in cfgs:
-        env = dict(os.environ)
-        if c == HOME / ".claude":
-            env.pop("CLAUDE_CONFIG_DIR", None)
-        else:
-            env["CLAUDE_CONFIG_DIR"] = str(c)
-        shown = "~/" + str(c.relative_to(HOME)) if str(c).startswith(str(HOME)) else str(c)
+        shown = short(c)
         try:
-            r = subprocess.run([exe, "-p", "/usage", "--output-format", "stream-json", "--verbose", "--no-session-persistence"],
-                               capture_output=True, text=True, env=env, timeout=90, stdin=subprocess.DEVNULL)
+            rows = refresh_one(c, exe)
         except (OSError, subprocess.SubprocessError) as e:
             print(t("r_fail", d=shown, e=e))
             continue
-        rows = parse_usage_report(r.stdout)
-        if not rows:  # signed out, or signed in with an API key: /usage then reports cost only
+        if rows is None:  # signed out, or signed in with an API key: /usage then reports cost only
             print(t("r_fail", d=shown, e=t("r_nologin", d=shown)))
             continue
         acct = cli_account(c)
-        rows = official_rows({"rows": rows})
-        cur[acct] = {"at": time.time(), "src": "usage", "rows": rows}
         print(t("r_ok", d=shown, a=names().get(acct, acct[:8]), rows=rows_text(rows)))
+
+
+def short(p):
+    return "~/" + str(p.relative_to(HOME)) if str(p).startswith(str(HOME) + os.sep) else str(p)
+
+
+def save_json(path, d):
     CONF.mkdir(parents=True, exist_ok=True)
-    LIMITS.write_text(json.dumps(cur, indent=2) + "\n")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    tmp.replace(path)
+
+
+def refresh_one(c, exe=None):
+    """The official /usage of one CLI config folder, saved to limits.json. None when it reports no plan usage.
+    Each folder's last answer is kept in logins.json for doctor."""
+    exe = exe or os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
+    env = dict(os.environ)
+    if c == HOME / ".claude":
+        env.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        env["CLAUDE_CONFIG_DIR"] = str(c)
+    r = subprocess.run([exe, "-p", "/usage", "--output-format", "stream-json", "--verbose", "--no-session-persistence"],
+                       capture_output=True, text=True, env=env, timeout=90, stdin=subprocess.DEVNULL)
+    rows = parse_usage_report(r.stdout)
+    logins = load(LOGINS) or {}
+    logins[str(c)] = {"at": time.time(), "ok": bool(rows)}
+    save_json(LOGINS, logins)
+    if not rows:
+        return None
+    acct = cli_account(c)
+    rows = official_rows({"rows": rows})
+    cur = load(LIMITS) or {}
+    cur[acct] = {"at": time.time(), "src": "usage", "rows": rows}
+    save_json(LIMITS, cur)
+    check_levels(acct, rows)
+    return rows
 
 
 def usage_report(extra_cfgs=(), now=None):
@@ -1008,16 +1092,18 @@ def usage_report(extra_cfgs=(), now=None):
     unmapped = by.get(None)
     rows.sort(key=lambda r: r["last"], reverse=True)
     free = [r for r in rows if not r["cool"]]
-    pct = lambda r: next((x["percent"] for x in (r["official"] or {}).get("rows", []) if x.get("kind") == "weekly_all"), None)
-    def mult(r):  # Pro = 1; Max 5x / 20x scale the same plan
-        m = re.search(r"(\d+)x", r["plan"])
-        return int(m.group(1)) if m else 1
-
-    # most quota left this week: (100 - weekly %) x plan size; accounts without official % fall back to least used
-    pick = min(free, key=lambda r: (pct(r) is None, -(100 - (pct(r) or 0)) * mult(r), r["week_usd"])) if free else None
+    pick = min(free, key=rank_key) if free else None
     first_back = min(rows, key=lambda r: r["cool"]["until"]) if rows and not free else None
     return {"now": now, "rows": rows, "pick": pick, "first_back": first_back,
             "unmapped_usd": sum(r[3] for r in unmapped["recs"] if r[0] >= now - WEEK) if unmapped else 0}
+
+
+def rank_key(r):
+    """Most quota left this week: (100 - weekly %) x plan size (Pro = 1, Max 5x / 20x scale the same plan);
+    accounts without an official % come after, least used first."""
+    pct = next((x["percent"] for x in (r["official"] or {}).get("rows", []) if x.get("kind") == "weekly_all"), None)
+    m = re.search(r"(\d+)x", r["plan"])
+    return (pct is None, -(100 - (pct or 0)) * (int(m.group(1)) if m else 1), r["week_usd"])
 
 
 def row_text(r, now):
@@ -1146,7 +1232,8 @@ def live_bar(live):
     from html import escape
     return f'''<section class="live" id="live"><h3 id="signed">…</h3><ol><li>{escape(t("p_step1"))}</li><li>{escape(t("p_step2"))}</li></ol>
 <div class="row"><button id="go" disabled>…</button><label><input type="checkbox" id="all"> {escape(t("p_all"))}</label>
-<button class="ghost" id="refresh">{escape(t("p_refresh"))}</button></div><pre class="log" id="log" hidden></pre></section>'''
+<button class="ghost" id="refresh">{escape(t("p_refresh"))}</button></div>
+<div class="row"><label><input type="checkbox" id="auto"> {escape(t("p_auto"))}</label></div><pre class="log" id="log" hidden></pre></section>'''
 
 
 def live_script(live):
@@ -1181,9 +1268,12 @@ document.getElementById("refresh").onclick = async () => {{
 document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () =>
   navigator.clipboard.writeText(b.dataset.copy).then(() => {{ b.textContent = T.p_copied; }}));
 document.querySelectorAll("[data-term]").forEach(b => b.onclick = async () => {{
-  const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc}});
+  const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc, auto: document.getElementById("auto").checked}});
   if (r.ok) b.textContent = T.p_term_done; else {{ const log = document.getElementById("log"); log.hidden = false; log.textContent = r.log; }}
 }}));
+const auto = document.getElementById("auto");
+try {{ auto.checked = localStorage.getItem("auto") === "1"; }} catch (e) {{}}
+auto.onchange = () => {{ try {{ localStorage.setItem("auto", auto.checked ? "1" : "0"); }} catch (e) {{}} }};
 poll(); setInterval(poll, 3000);
 </script>"""
 
@@ -1352,7 +1442,7 @@ def cmd_panel(args):
                 cfg = next((c for c in cli_configs(args.config or ()) if acct and cli_account(c) == acct), None)
                 if not cfg:
                     return self.send(404, json.dumps({"ok": False, "log": t("t_none", t=acct[:8])}, ensure_ascii=False))
-                open_terminal(cfg, bool(body.get("rc")))
+                open_terminal(cfg, bool(body.get("rc")), bool(body.get("auto")))
                 return self.send(200, json.dumps({"ok": True, "log": ""}))
             if path == "/refresh":
                 import contextlib
@@ -1611,10 +1701,8 @@ def watch_record(sp, state):
                     for key, kind in (("seven_day", "weekly_all"), ("five_hour", "session"))
                     if isinstance(rl.get(key), dict) and rl[key].get("used_percentage") is not None]
             cur[acct] = {"at": time.time(), "src": "statusline", "rows": rows}
-            CONF.mkdir(parents=True, exist_ok=True)
-            tmp = LIMITS.with_suffix(".tmp")
-            tmp.write_text(json.dumps(cur, indent=2) + "\n")
-            tmp.replace(LIMITS)
+            save_json(LIMITS, cur)
+            check_levels(acct, rows)
             f5 = (rl.get("five_hour") or {}).get("used_percentage")
             f7 = (rl.get("seven_day") or {}).get("used_percentage")
             shown = " · ".join(x for x in (f"5h {f5:.0f}%" if f5 is not None else "", f"7d {f7:.0f}%" if f7 is not None else "") if x)
@@ -1629,6 +1717,299 @@ def watch_record(sp, state):
         except (OSError, subprocess.SubprocessError):
             pass
     print(shown)
+
+
+# ---------- notifications
+def notify_conf():
+    c = load(NOTIFY)
+    c = c if isinstance(c, dict) else {}
+    lv = c.get("levels")
+    levels = sorted(int(x) for x in lv) if isinstance(lv, list) and lv and all(isinstance(x, (int, float)) for x in lv) else list(LEVELS)
+    return {"on": c.get("on") is not False, "levels": levels}
+
+
+def notify(title, body):
+    """A macOS notification. It never fails: the status line recorder calls it too."""
+    cmd = os.environ.get("CLAUDE_MOVE_NOTIFY_CMD")
+    try:
+        if cmd:
+            subprocess.run(cmd, shell=True, input=f"{title}\n{body}\n", text=True, timeout=10)
+        elif sys.platform == "darwin":
+            script = (f"display notification {json.dumps(body, ensure_ascii=False)} "
+                      f"with title {json.dumps(title, ensure_ascii=False)}")
+            subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def check_levels(acct, rows):
+    """Notify once per reset window when an official meter passes each level (75/90/95% by default)."""
+    conf = notify_conf()
+    if not conf["on"] or not acct:
+        return
+    state = load(NOTIFIED) or {}
+    mine = dict(state.get(acct) or {})
+    changed = False
+    for r in rows:
+        p = r.get("percent")
+        if p is None:
+            continue
+        key = f'{r.get("kind", "")}:{r.get("scope") or ""}'
+        old = dict(mine.get(key) or {})
+        reset = r.get("resets_at") or 0
+        if abs(reset - (old.get("reset") or 0)) > 3600:  # a new window; reset times drift by seconds between sources
+            old = {"reset": reset, "level": 0}
+        hit = max((lv for lv in conf["levels"] if p >= lv), default=0)
+        if hit > old.get("level", 0):
+            msg = t("n_level", a=names().get(acct, acct[:8]), k=row_label(r), p=f"{p:.0f}")
+            notify(t("n_title"), msg + (" · " + t("n_reset", w=clock(reset)) if reset else ""))
+            old["level"] = hit
+        if mine.get(key) != old:
+            mine[key], changed = old, True
+    if changed:
+        state[acct] = mine
+        save_json(NOTIFIED, state)
+
+
+def cmd_notify(args):
+    conf = notify_conf()
+    if args.action == "test":
+        notify(t("n_title"), t("n_test"))
+        print(t("n_sent"))
+        return
+    if args.action in ("on", "off"):
+        conf["on"] = args.action == "on"
+    if args.levels:
+        conf["levels"] = sorted({int(x) for x in args.levels.split(",") if x.strip()})
+    if args.action != "status" or args.levels:
+        save_json(NOTIFY, conf)
+    print(t("n_on", l="/".join(map(str, conf["levels"]))) if conf["on"] else t("n_off"))
+
+
+# ---------- run: switch account at a usage limit and go on
+def transcript_files(cfg, sid):
+    proj = cfg / "projects"
+    return list(proj.glob(f"*/{sid}.jsonl")) + list(proj.glob(f"*/{sid}/subagents/*.jsonl"))
+
+
+def new_limit_hit(cfg, sid, marks):
+    """A usage-limit record written to this session's transcripts (subagents included) since the last look."""
+    for f in transcript_files(cfg, sid):
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(marks.get(f, 0))
+                data = fh.read()
+        except OSError:
+            continue
+        end = data.rfind(b"\n") + 1
+        marks[f] = marks.get(f, 0) + end
+        for raw in data[:end].splitlines():
+            if b"usage_limit_reached" not in raw:
+                continue
+            try:
+                rec = json.loads(raw)
+            except ValueError:
+                continue
+            info = (rec.get("apiErrorParams") or {}).get("rate_limit_info")
+            if rec.get("apiError") == "usage_limit_reached" and isinstance(info, dict):
+                return {"kind": info.get("rateLimitType") or "", "until": info.get("resetsAt") or 0}
+    return None
+
+
+def next_account(skip, extra=()):
+    """The CLI login with the most quota left that is not cooling. Each candidate is asked its official /usage
+    first, which also proves the folder is really signed in."""
+    by = {}
+    for c in cli_configs(extra):
+        by.setdefault(cli_account(c), c)
+    rep = usage_report([str(c) for c in by.values() if c != HOME / ".claude"])
+    ranked = [r["acct"] for r in sorted(rep["rows"], key=rank_key) if not r["cool"]]
+    ranked += [a for a in by if a not in ranked]
+    now = time.time()
+    for acct in ranked:
+        if acct not in by or acct in skip:
+            continue
+        try:
+            rows = refresh_one(by[acct])
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if rows is None or any((r.get("percent") or 0) >= 100 and (r.get("resets_at") or 0) > now for r in rows):
+            continue
+        return by[acct]
+    return None
+
+
+def copy_session(src_cfg, dst_cfg, sid):
+    """Copy the session's transcript and side folder into the other config folder; whatever was there for this
+    session is saved first. Returns the backup folder, if one was needed."""
+    src = next(iter(src_cfg.glob(f"projects/*/{sid}.jsonl")), None)
+    if not src:
+        return False
+    ddir = dst_cfg / "projects" / src.parent.name
+    ddir.mkdir(parents=True, exist_ok=True)
+    bk = None
+    for name in (src.name, sid):
+        d = ddir / name
+        if d.exists():
+            bk = bk or CONF / "run-backups" / f'{time.strftime("%Y%m%d-%H%M%S")}-{dst_cfg.name.lstrip(".")}'
+            bk.mkdir(parents=True, exist_ok=True)
+            (shutil.copytree if d.is_dir() else shutil.copy2)(d, bk / name)
+    shutil.copy2(src, ddir / src.name)
+    side = src.parent / sid
+    if side.is_dir():
+        shutil.copytree(side, ddir / sid, dirs_exist_ok=True)
+    return bk
+
+
+def restore_tty():
+    if sys.stdin.isatty():
+        subprocess.run(["stty", "sane"], check=False)
+        sys.stderr.write("\033[?25h\n")
+
+
+def cmd_run(args):
+    """Run Claude Code with one account's CLI login. When the session hits a usage limit, stop it, copy it into the
+    CLI login with the most left and resume it there with a note to continue. Logins are never read or changed."""
+    import signal
+    import uuid
+    exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude")
+    if not exe:
+        sys.exit(t("r_noclaude"))
+    cfg = cli_dir(args.account.strip(), args.config or ())
+    if not cfg:
+        sys.exit(t("t_none", t=args.account))
+    sid, resume, prompt = args.resume or str(uuid.uuid4()), bool(args.resume), None
+    poll = float(os.environ.get("CLAUDE_MOVE_POLL") or 2)
+    skip = {}  # accounts that hit a limit in this run -> when they are back
+    signal.signal(signal.SIGINT, lambda *a: None)  # Ctrl-C is for claude; caught signals reset to default in the child
+    while True:
+        acct = cli_account(cfg)
+        cmd = [exe] + (["--resume", sid] if resume else ["--session-id", sid])
+        cmd += (["--remote-control", rc_name(acct)] if args.rc else []) + list(args.claude_args or [])
+        cmd += [prompt] if prompt else []
+        env = dict(os.environ)
+        if cfg == HOME / ".claude":
+            env.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            env["CLAUDE_CONFIG_DIR"] = str(cfg)
+        print(t("run_on", a=names().get(acct, acct[:8]), c=cli_command(cfg)), file=sys.stderr)
+        marks = {}
+        for f in transcript_files(cfg, sid):  # only what is written from now on counts
+            try:
+                marks[f] = f.stat().st_size
+            except OSError:
+                pass
+        child = subprocess.Popen(cmd, env=env)
+        hit = None
+        while child.poll() is None and not hit:
+            time.sleep(poll)
+            hit = new_limit_hit(cfg, sid, marks)
+        if not hit:
+            restore_tty()
+            sys.exit(child.returncode if child.returncode >= 0 else 1)
+        now = time.time()
+        skip[acct] = hit["until"] or now + FIVE_H
+        skip = {a: u for a, u in skip.items() if u > now}
+        nxt = next_account(skip, args.config or ())
+        who = names().get(acct, acct[:8])
+        if not nxt:  # leave claude as it is; the user can wait for the reset in it
+            notify(t("n_title"), t("n_none", a=who))
+            child.wait()
+            restore_tty()
+            print(t("run_none", a=who), file=sys.stderr)
+            sys.exit(child.returncode if child.returncode >= 0 else 1)
+        child.terminate()
+        try:
+            child.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+        restore_tty()
+        k = t("u_kind_week") if hit["kind"] == "seven_day" else t("u_kind_5h")
+        print(t("run_hit", a=who, k=k, w=clock(skip[acct])), file=sys.stderr)
+        nb = names().get(cli_account(nxt), cli_account(nxt)[:8])
+        print(t("run_switch", b=nb), file=sys.stderr)
+        bk = copy_session(cfg, nxt, sid)
+        if bk is False:
+            sys.exit(t("run_lost", d=short(cfg)))
+        if bk:
+            print(t("run_backup", b=nb, p=bk), file=sys.stderr)
+        notify(t("n_title"), t("n_switch", a=who, b=nb))
+        cfg, resume, prompt = nxt, True, t("run_prompt")
+
+
+# ---------- doctor
+def cmd_doctor(args):
+    if args.refresh:
+        refresh_official(args.config or ())
+        print()
+    issues = 0
+    nm = names()
+    accts = accounts()
+    timeline = signin_timeline()
+    signed = timeline[-1][1] if timeline else None
+    print(t("d_desk"))
+    if signed:
+        print(t("d_signed", a=nm.get(signed, signed[:8])))
+    desk = {}
+    for a in accts:
+        if a["sessions"]:
+            desk.setdefault(a["acct"], a)
+    for acct in desk:
+        if not nm.get(acct):
+            print(t("d_unnamed", a=acct[:8]))
+            issues += 1
+    print(t("d_cli"))
+    logins = load(LOGINS) or {}
+    plan_of = plans(args.config or ())
+    found = sorted(p for p in HOME.glob(".claude-*") if p.is_dir())
+    found += [Path(os.path.expanduser(c)) for c in args.config or ()] + [HOME / ".claude"]
+    where = {}
+    for c in dict.fromkeys(found):
+        acct = cli_account(c)
+        if not acct:
+            print(t("d_cli_none", d=short(c)))
+            continue
+        where.setdefault(acct, []).append(c)
+        st = logins.get(str(c))
+        s = (t("d_ok_at" if st.get("ok") else "d_bad_at", w=ago(time.time() - st.get("at", 0)))
+             if isinstance(st, dict) else t("d_unchecked"))
+        plan = f' ({plan_of[acct]})' if plan_of.get(acct) else ""
+        print(t("d_cli_row", d=short(c), a=nm.get(acct, acct[:8]), p=plan, s=s))
+    used = {}
+    for acct, dirs in where.items():
+        used[acct] = dirs[0]  # same order as cli_configs: a folder made for the account wins over ~/.claude
+        if len(dirs) > 1:
+            stale = [d for d in dirs[1:] if not (logins.get(str(d)) or {}).get("ok", True)]
+            if len(stale) == len(dirs) - 1:
+                print(t("d_stale", a=nm.get(acct, acct[:8]), d=", ".join(short(d) for d in stale), u=short(dirs[0])))
+            else:
+                print(t("d_dup", a=nm.get(acct, acct[:8]), ds=", ".join(short(d) for d in dirs), u=short(dirs[0])))
+                issues += 1
+    for acct in desk:
+        if acct not in where:
+            print(t("d_no_cli", a=nm.get(acct, acct[:8]), n=nm.get(acct) or "name"))
+            issues += 1
+    for acct, c in used.items():
+        if (logins.get(str(c)) or {}).get("ok") is False:
+            continue
+        sp = (DESKTOP_HOME if c == HOME / ".claude" else c) / "settings.json"
+        s = load(sp) or {}
+        line = s.get("statusLine") if isinstance(s, dict) else None
+        if not (isinstance(line, dict) and "watch record" in (line.get("command") or "")):
+            fix = "claude-move watch install" if c == HOME / ".claude" else f"CLAUDE_CONFIG_DIR={short(c)} claude-move watch install"
+            print(t("d_watch", d=short(c), c=fix))
+            issues += 1
+    print(t("d_misc"))
+    conf = notify_conf()
+    print(t("d_notify_on", l="/".join(map(str, conf["levels"]))) if conf["on"] else t("d_notify_off"))
+    app = Path(os.path.expanduser("~/Applications")) / APP_NAME
+    if sys.platform == "darwin" and app.exists():
+        ok = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True).returncode == 0
+        print(t("d_app_ok" if ok else "d_app_bad"))
+        issues += 0 if ok else 1
+    print()
+    print(t("d_count", n=issues) if issues else t("d_fine"))
 
 
 def main(argv=None):
@@ -1687,10 +2068,27 @@ def main(argv=None):
     ap.set_defaults(fn=cmd_app)
     tm = sub.add_parser("term", help="open a Terminal window running Claude Code with that account's CLI login")
     tm.add_argument("account", help="label or id prefix of an account signed in under ~/.claude or ~/.claude-*")
+    tm.add_argument("--auto", action="store_true", help="through claude-move run: switch account at a usage limit")
     tm.add_argument("--rc", action="store_true",
                     help="start it as a Remote Control session named after the account, so the phone app can join")
     tm.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
     tm.set_defaults(fn=cmd_term)
+    rn = sub.add_parser("run", help="run Claude Code as an account; at a usage limit, move the session to the account "
+                                    "with the most left and resume it there")
+    rn.add_argument("account", help="label or id prefix of an account with a CLI login")
+    rn.add_argument("--rc", action="store_true", help="as a Remote Control session named after the account")
+    rn.add_argument("--resume", metavar="ID", help="resume this session id instead of starting a new one")
+    rn.add_argument("--config", action="append", help="also use this CLI config folder (repeatable)")
+    rn.add_argument("claude_args", nargs="*", help="more arguments for claude, after --")
+    rn.set_defaults(fn=cmd_run)
+    nt = sub.add_parser("notify", help="macOS notifications when an account's official %% passes 75/90/95%%")
+    nt.add_argument("action", choices=["on", "off", "status", "test"])
+    nt.add_argument("--levels", help="comma-separated levels, e.g. 80,95")
+    nt.set_defaults(fn=cmd_notify)
+    dr = sub.add_parser("doctor", help="check accounts, CLI logins, duplicates, the status line recorder and the app")
+    dr.add_argument("--refresh", action="store_true", help="first ask each CLI login its official /usage")
+    dr.add_argument("--config", action="append", help="also check this CLI config folder (repeatable)")
+    dr.set_defaults(fn=cmd_doctor)
     w = sub.add_parser("watch", help="record official CLI rate limits from the Claude Code status line")
     w.add_argument("action", choices=["install", "uninstall", "record"])
     w.set_defaults(fn=cmd_watch)
