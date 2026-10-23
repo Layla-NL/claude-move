@@ -3,7 +3,9 @@
 
 When you sign the Claude desktop app into a different account, the Code tab's session list
 looks empty: the list is stored per account, under
-  ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json
+  ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json   (macOS)
+  %APPDATA%/Claude/claude-code-sessions/...   (Windows; the Store version keeps it under
+  %LOCALAPPDATA%/Packages/Claude_*/LocalCache/Roaming/Claude)
 while the transcripts themselves live in ~/.claude/projects and are not tied to any account.
 This tool copies those list entries from one account to another. It never deletes anything,
 and it backs up the target account's list before it writes.
@@ -36,10 +38,29 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
+WIN = sys.platform == "win32"
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
-ROOT = Path(os.environ.get("CLAUDE_MOVE_ROOT", str(HOME / "Library/Application Support/Claude/claude-code-sessions")))
+
+
+def desktop_dir():
+    """The desktop app's own data folder. On Windows the installer build uses %APPDATA%/Claude and the Store
+    (MSIX) build a redirected copy under %LOCALAPPDATA%/Packages; the one with the newest session list wins."""
+    if not WIN:
+        return HOME / "Library/Application Support/Claude"
+    roaming = Path(os.environ.get("APPDATA") or HOME / "AppData/Roaming") / "Claude"
+    local = Path(os.environ.get("LOCALAPPDATA") or HOME / "AppData/Local")
+    found = []
+    for d in [roaming] + sorted(local.glob("Packages/*/LocalCache/Roaming/Claude")):
+        try:
+            found.append((max([p.stat().st_mtime for p in (d / "claude-code-sessions").iterdir()] or [0]), d))
+        except OSError:
+            pass
+    return max(found, key=lambda x: x[0])[1] if found else roaming
+
+
+ROOT = Path(os.environ.get("CLAUDE_MOVE_ROOT") or desktop_dir() / "claude-code-sessions")
 BACKUPS = Path(os.environ.get("CLAUDE_MOVE_BACKUPS", str(ROOT.parent / "claude-code-sessions-backups")))
 NAMES = Path(os.environ.get("CLAUDE_MOVE_NAMES", str(HOME / ".config/claude-move/accounts.json")))
 DESKTOP_HOME = Path(os.environ.get("CLAUDE_MOVE_DESKTOP_CONFIG", str(HOME / ".claude")))
@@ -48,6 +69,12 @@ MANIFEST = ".claude-move.json"
 
 def _zh():
     lang = os.environ.get("CLAUDE_MOVE_LANG") or os.environ.get("LC_ALL") or os.environ.get("LANG") or ""
+    if not lang and WIN:  # Windows locale names read "Chinese (Simplified)_China"; ask for the UI language instead
+        try:
+            import ctypes
+            return ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF == 0x04
+        except (AttributeError, OSError):
+            pass
     if not lang:
         try:
             lang = locale.getlocale()[0] or ""
@@ -130,6 +157,7 @@ T = {
     "a_in_dock": ("Already in the Dock.", "程序坞里已经有了。"),
     "a_removed": ("Removed {p}. If it is still in the Dock, drag it out.", "已删除 {p}。程序坞里如果还有它的图标，拖出来就行。"),
     "a_mac": ("Claude Move.app is macOS only.", "Claude Move.app 只支持 macOS。"),
+    "a_win_icon": ("On Windows the icon must be a .png or .ico file.", "Windows 上图标要用 .png 或 .ico 文件。"),
     "p_url": ("Panel running at {u}  (only this Mac can open it; Ctrl-C to stop)", "面板已启动：{u}（只有本机能打开；按 Ctrl-C 关掉）"),
     "p_detached_app": ("Started inside the desktop app, so the panel was opened through Claude Move.app instead: quitting the app from the panel would otherwise stop it.",
                        "这是在桌面 App 里启动的，所以改由 Claude Move.app 打开面板：不然从面板退出 App 时，面板会被一起关掉。"),
@@ -296,26 +324,52 @@ T = {
 }
 
 
+# Windows wording: PowerShell commands, the Start menu instead of the Dock, "this computer" instead of "this Mac"
+TW = {
+    "running": ("Quit the Claude desktop app completely first (right-click its icon in the taskbar notification area -> Quit), then run this again.",
+                "请先完全退出桌面 App（右键任务栏通知区域里的 Claude 图标 → 退出），再运行。"),
+    "u_title": ("Quota by account: cooling and reset times from the official limit messages, use counted from this computer's transcripts, official % from the CLI (usage --refresh, or the status line recorder)",
+                "各账号额度：冷却和恢复时间来自官方的限额提示，用量按本机会话记录统计，官方百分比来自命令行版（usage --refresh 或状态栏记录器）"),
+    "r_nologin": ("no plan usage: not signed in with a Claude subscription (run in PowerShell: $env:CLAUDE_CONFIG_DIR=\"{p}\"; claude, then /login)",
+                  "没有套餐额度：这个目录没登录订阅账号（在 PowerShell 里先运行 $env:CLAUDE_CONFIG_DIR=\"{p}\"; claude，再输入 /login）"),
+    "r_none": ("No CLI logins found. Sign each account in once, in PowerShell: $env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-<name>\"; claude, then /login.",
+               "没找到命令行登录。每个号登录一次，在 PowerShell 里：$env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-<名字>\"; claude，再输入 /login。"),
+    "a_done": ("Installed {p}. Open Claude Move from the Start menu to open the panel.", "已安装 {p}，从开始菜单打开 Claude Move 就能打开面板。"),
+    "a_dock": ("Added a shortcut to the desktop.", "桌面上也放了一个快捷方式。"),
+    "a_removed": ("Removed {p} and its desktop shortcut.", "已删除 {p} 和桌面上的快捷方式。"),
+    "p_url": ("Panel running at {u}  (only this computer can open it; Ctrl-C to stop)", "面板已启动：{u}（只有本机能打开；按 Ctrl-C 关掉）"),
+    "p_detached_app": ("Started inside the desktop app, so the panel was opened through the Claude Move shortcut instead: quitting the app from the panel would otherwise stop it.",
+                       "这是在桌面 App 里启动的，所以改由 Claude Move 快捷方式打开面板：不然从面板退出 App 时，面板会被一起关掉。"),
+    "t_none": ("No CLI login for \"{t}\". Sign it in once, in PowerShell: $env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-<name>\"; claude, then /login.",
+               "“{t}”没有命令行登录。先登录一次，在 PowerShell 里：$env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-<名字>\"; claude，再输入 /login。"),
+    "d_no_cli": ("{a} has desktop sessions but no CLI login, so Open in Terminal and run cannot use it. In PowerShell: $env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-{n}\"; claude, then /login",
+                 "{a} 有桌面会话，但没有命令行登录，打开终端和自动续接都用不了它。在 PowerShell 里：$env:CLAUDE_CONFIG_DIR=\"$HOME\\.claude-{n}\"; claude，再输入 /login"),
+    "d_app_ok": ("Claude Move shortcut: installed", "Claude Move 快捷方式：已安装"),
+    "u_notes": ("Use is priced at API list prices only to compare accounts; it counts Claude Code on this computer, not claude.ai chat or other devices.",
+                "用量按 API 价折算，只用来比较几个号谁用得多；只算这台电脑上的 Claude Code，网页聊天和别的设备上的用量算不进来。"),
+}
+
+
 def t(key, **kw):
-    s = T[key][1 if ZH else 0]
+    s = (WIN and TW.get(key) or T[key])[1 if ZH else 0]
     return s.format(**kw) if kw else s
 
 
 def names():
     try:
-        return json.loads(NAMES.read_text())
+        return json.loads(NAMES.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
 def save_names(d):
     NAMES.parent.mkdir(parents=True, exist_ok=True)
-    NAMES.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+    NAMES.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load(p):
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
@@ -370,9 +424,78 @@ def active(a, days, include_all):
             if not d.get("isArchived") and (include_all or (d.get("lastActivityAt") or 0) >= cutoff)]
 
 
+def kernel32():
+    """Windows: kernel32 with the few calls used here typed, so 64-bit handles are not cut short."""
+    import ctypes
+    from ctypes import wintypes as w
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype, k.OpenProcess.argtypes = w.HANDLE, [w.DWORD, w.BOOL, w.DWORD]
+    k.CloseHandle.argtypes = [w.HANDLE]
+    k.GetExitCodeProcess.argtypes = [w.HANDLE, ctypes.POINTER(w.DWORD)]
+    k.QueryFullProcessImageNameW.argtypes = [w.HANDLE, w.DWORD, w.LPWSTR, ctypes.POINTER(w.DWORD)]
+    k.CreateToolhelp32Snapshot.restype, k.CreateToolhelp32Snapshot.argtypes = w.HANDLE, [w.DWORD, w.DWORD]
+    return k
+
+
+def win_procs():
+    """Windows: {pid: (parent pid, exe)} from a process snapshot; claude.exe entries carry their full path."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD), ("pid", w.DWORD), ("heap", ctypes.c_void_p),
+                    ("module", w.DWORD), ("threads", w.DWORD), ("ppid", w.DWORD), ("prio", w.LONG),
+                    ("flags", w.DWORD), ("exe", w.WCHAR * 260)]
+    k = kernel32()
+    k.Process32FirstW.argtypes = k.Process32NextW.argtypes = [w.HANDLE, ctypes.POINTER(Entry)]
+    out = {}
+    snap = k.CreateToolhelp32Snapshot(2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return out
+    try:
+        e = Entry()
+        e.dwSize = ctypes.sizeof(Entry)
+        ok = k.Process32FirstW(snap, ctypes.byref(e))
+        while ok:
+            out[e.pid] = (e.ppid, e.exe)
+            ok = k.Process32NextW(snap, ctypes.byref(e))
+    finally:
+        k.CloseHandle(snap)
+    for pid, (ppid, exe) in out.items():
+        if exe.lower() == "claude.exe":
+            h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if h:
+                buf, n = ctypes.create_unicode_buffer(32768), w.DWORD(32768)
+                if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                    out[pid] = (ppid, buf.value)
+                k.CloseHandle(h)
+    return out
+
+
+def desktop_exe(path):
+    """Windows: whether an exe path is the desktop app (an Electron build) rather than the claude CLI."""
+    p = path.replace("/", "\\").lower()
+    if not p.endswith("\\claude.exe"):
+        return False
+    return ("\\anthropicclaude\\" in p or re.search(r"\\windowsapps\\(claude|anthropic)[^\\]*\\", p) is not None
+            or os.path.exists(os.path.join(os.path.dirname(path), "resources", "app.asar")))
+
+
+def app_pids():
+    """Windows: the desktop app's top processes (its helpers are their children)."""
+    procs = win_procs()
+    app = {pid for pid, (_, exe) in procs.items() if desktop_exe(exe)}
+    return [pid for pid in app if procs[pid][0] not in app], procs
+
+
 def app_running():
     if os.environ.get("CLAUDE_MOVE_SKIP_APP_CHECK") == "1":
         return False
+    if WIN:
+        try:
+            return bool(app_pids()[0])
+        except (OSError, AttributeError):
+            return False
     try:
         out = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True).stdout
     except OSError:
@@ -472,7 +595,7 @@ def cmd_to(args):
     manifest = {"version": 1, "target": str(dst["dir"]), "account": dst["acct"], "created": int(time.time()),
                 "replaced": [tg.name for _, tg, _ in plan if tg.exists()],
                 "added": [tg.name for _, tg, _ in plan if not tg.exists()]}
-    (bk / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
+    (bk / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(t("backed", p=bk))
     for f, target, _ in plan:
         shutil.copy2(f, target)
@@ -527,7 +650,7 @@ def cmd_undo(args):
     for n in added:
         (target / n).unlink()
     m["undone"] = int(time.time())
-    (bk / MANIFEST).write_text(json.dumps(m, indent=2) + "\n")
+    (bk / MANIFEST).write_text(json.dumps(m, indent=2) + "\n", encoding="utf-8")
     print(t("undo_done", p=snap))
 
 
@@ -564,7 +687,7 @@ def cmd_import_cli(args):
     if src_cfg.resolve() == dst_cfg.resolve():
         sys.exit(t("same_cfg"))
     proj = args.project or os.getcwd()
-    literal = "/" not in proj and (src_cfg / "projects" / proj).is_dir()
+    literal = "/" not in proj and os.sep not in proj and (src_cfg / "projects" / proj).is_dir()
     name = proj if literal else project_dir_name(os.path.abspath(os.path.expanduser(proj)))
     sdir = src_cfg / "projects" / name
     if not sdir.is_dir():
@@ -613,7 +736,7 @@ def import_one(f, dst_cfg):
 # ---------- quota panel: usage / watch
 CONF = NAMES.parent
 CACHE = Path(os.environ.get("CLAUDE_MOVE_CACHE", str(HOME / ".cache/claude-move/usage-v2.json")))
-LOGS = Path(os.environ.get("CLAUDE_MOVE_LOGS", str(HOME / "Library/Logs/Claude")))
+LOGS = Path(os.environ.get("CLAUDE_MOVE_LOGS") or (ROOT.parent / "logs" if WIN else HOME / "Library/Logs/Claude"))
 LIMITS = CONF / "limits.json"
 PANEL = CONF / "panel.json"
 WATCH = CONF / "watch.json"
@@ -701,7 +824,7 @@ def scan(roots):
     for key in [k for k in files if k not in seen]:
         del files[key]
     CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(cache, separators=(",", ":")))
+    CACHE.write_text(json.dumps(cache, separators=(",", ":")), encoding="utf-8")
     recs, hits, dedup = [], [], set()
     for c in files.values():
         for r in c["recs"]:
@@ -857,11 +980,22 @@ def plans(extra=()):
     return out
 
 
-def cli_command(cfg):
+def env_cmd(cfg, cmd):
+    """cmd with this CLI config folder, as typed into the user's shell (PowerShell on Windows)."""
     if cfg == HOME / ".claude":
-        return "claude"
+        return cmd
+    if WIN:
+        return f"$env:CLAUDE_CONFIG_DIR={ps_quote(cfg)}; {cmd}"
     shown = "~/" + str(cfg.relative_to(HOME)) if str(cfg).startswith(str(HOME) + os.sep) else str(cfg)
-    return f"CLAUDE_CONFIG_DIR={shown} claude"
+    return f"CLAUDE_CONFIG_DIR={shown} {cmd}"
+
+
+def ps_quote(x):
+    return "'" + str(x).replace("'", "''") + "'"
+
+
+def cli_command(cfg):
+    return env_cmd(cfg, "claude")
 
 
 def cli_dir(token, extra=()):
@@ -878,7 +1012,8 @@ def rc_name(acct):
 
 def rc_command(cfg):
     from shlex import quote
-    return f"{cli_command(cfg)} --remote-control {quote(rc_name(cli_account(cfg)))}"
+    name = rc_name(cli_account(cfg))
+    return env_cmd(cfg, f"claude --remote-control {ps_quote(name) if WIN else quote(name)}")
 
 
 def recent_cwd(cfg):
@@ -920,33 +1055,66 @@ def recent_cwd(cfg):
 
 
 def open_terminal(cfg, rc=False, auto=False):
-    """A new Terminal window running `claude` with this config folder, so the CLI uses that folder's own login, in the
+    """A new terminal window running `claude` with this config folder, so the CLI uses that folder's own login, in the
     account's last project folder; with rc, as a Remote Control session named after the account so the phone app
     can join it; with auto, through `claude-move run`, which changes account at a usage limit.
-    It writes a small .command file and lets macOS open it: no Automation permission, no credentials."""
-    from shlex import quote
+    It writes a small script and opens it (.command on macOS: no Automation permission; .cmd on Windows)."""
     exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
-    env = "unset CLAUDE_CONFIG_DIR\n" if cfg == HOME / ".claude" else f"export CLAUDE_CONFIG_DIR={quote(str(cfg))}\n"
     cwd = recent_cwd(cfg)
-    go = f"cd {quote(str(cwd))} 2>/dev/null || cd ~ || exit 1\n" if cwd else "cd ~ || exit 1\n"
     if auto:
-        env = f"export CLAUDE_MOVE_LANG={'zh' if ZH else 'en'}\n"
-        run = (f"exec {quote(sys.executable)} {quote(str(Path(__file__).resolve()))} run --config {quote(str(cfg))} "
-               f"{quote(cli_account(cfg))}" + (" --rc" if rc else ""))
+        env = {"CLAUDE_MOVE_LANG": "zh" if ZH else "en"}
+        argv = [console_python(), Path(__file__).resolve(), "run", "--config", cfg, cli_account(cfg)] + (["--rc"] if rc else [])
     else:
-        run = f"exec {quote(exe)}" + (f" --remote-control {quote(rc_name(cli_account(cfg)))}" if rc else "")
-    script = CONF / "term" / (cfg.name.lstrip(".") + ("-rc" if rc else "") + ("-auto" if auto else "") + ".command")
-    open_command(script, f"#!/bin/sh\n{go}{env}{run}\n")
+        env = {"CLAUDE_CONFIG_DIR": None if cfg == HOME / ".claude" else cfg}
+        argv = [exe] + (["--remote-control", rc_name(cli_account(cfg))] if rc else [])
+    open_command(term_script(cfg.name.lstrip(".") + ("-rc" if rc else "") + ("-auto" if auto else ""), cwd, env, argv))
     return cwd
 
 
-def open_command(script, body):
+def console_python():
+    """This Python, but the console one when the panel runs under Windows' windowless pythonw."""
+    exe = Path(sys.executable)
+    con = exe.with_name("python.exe")
+    return con if WIN and exe.name.lower() == "pythonw.exe" and con.exists() else exe
+
+
+def term_script(name, cwd, env, argv, before=(), after=()):
+    """A script for a new terminal window: go to cwd (else home), set env (None unsets), print `before`, run argv,
+    then print `after`. Returns its path under CONF/term and its text: sh on macOS, cmd on Windows."""
+    if WIN:
+        bare = lambda x: str(x).replace('"', "").replace("%", "%%")
+        q = lambda x: f'"{bare(x)}"' if not str(x) or re.search(r"[\s&|<>^(),;=!%]", str(x)) else bare(x)
+        say = lambda x: "echo(" + re.sub(r"([&|<>^()])", r"^\1", str(x)).replace("%", "%%")
+        lines = ["@echo off", "chcp 65001 >nul", (f"cd /d {q(cwd)} 2>nul || " if cwd else "") + 'cd /d "%USERPROFILE%"']
+        lines += [f'set "{k}={"" if v is None else bare(v)}"' for k, v in env.items()]
+        run = " ".join(q(a) for a in argv)
+        if str(argv[0]).lower().endswith((".cmd", ".bat")):  # an npm install's claude.cmd: come back after it
+            run = "call " + run
+        lines += [say(x) for x in before] + [run] + [say(x) for x in after]
+        return CONF / "term" / (name + ".cmd"), "\r\n".join(lines) + "\r\n"
     from shlex import quote
+    lines = ["#!/bin/sh", (f"cd {quote(str(cwd))} 2>/dev/null || " if cwd else "") + "cd ~ || exit 1"]
+    lines += [f"unset {k}" if v is None else f"export {k}={quote(str(v))}" for k, v in env.items()]
+    lines += [f"echo {quote(x)}" for x in before]
+    lines += [("" if after else "exec ") + " ".join(quote(str(a)) for a in argv)]
+    lines += [f"echo {quote(x)}" for x in after]
+    return CONF / "term" / (name + ".command"), "\n".join(lines) + "\n"
+
+
+def open_command(script_body):
+    """Open a term_script in a new terminal window. On Windows the window stays open after it ends, as Terminal's does."""
+    from shlex import quote
+    script, body = script_body
     script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text(body)
+    script.write_bytes(body.encode("utf-8"))
     script.chmod(0o700)
     cmd = os.environ.get("CLAUDE_MOVE_TERM_CMD")
-    subprocess.run(cmd + " " + quote(str(script)), shell=True) if cmd else subprocess.run(["open", str(script)], check=False)
+    if cmd:
+        subprocess.run(f'{cmd} "{script}"' if WIN else f"{cmd} {quote(str(script))}", shell=True)
+    elif WIN:
+        subprocess.Popen(["cmd.exe", "/k", str(script)], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        subprocess.run(["open", str(script)], check=False)
 
 
 def cmd_term(args):
@@ -1065,7 +1233,7 @@ def refresh_official(extra=()):
             print(t("r_fail", d=shown, e=e))
             continue
         if rows is None:  # signed out, or signed in with an API key: /usage then reports cost only
-            print(t("r_fail", d=shown, e=t("r_nologin", d=shown)))
+            print(t("r_fail", d=shown, e=t("r_nologin", d=shown, p=c)))
             continue
         acct = cli_account(c)
         print(t("r_ok", d=shown, a=names().get(acct, acct[:8]), rows=rows_text(rows)))
@@ -1078,7 +1246,7 @@ def short(p):
 def save_json(path, d):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
@@ -1092,7 +1260,8 @@ def refresh_one(c, exe=None):
     else:
         env["CLAUDE_CONFIG_DIR"] = str(c)
     r = subprocess.run([exe, "-p", "/usage", "--output-format", "stream-json", "--verbose", "--no-session-persistence"],
-                       capture_output=True, text=True, env=env, timeout=90, stdin=subprocess.DEVNULL)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=90,
+                       stdin=subprocess.DEVNULL)
     rows = parse_usage_report(r.stdout)
     logins = load(LOGINS) or {}
     logins[str(c)] = {"at": time.time(), "ok": bool(rows)}
@@ -1221,8 +1390,8 @@ def cmd_usage(args):
         CONF.mkdir(parents=True, exist_ok=True)
         out.write_text(render_html(rep), encoding="utf-8")
         print(t("u_html", p=out))
-        if not args.no_open and sys.platform == "darwin":
-            subprocess.run(["open", str(out)], check=False)
+        if not args.no_open:
+            open_path(out)
 
 
 def render_html(rep, live=None):
@@ -1368,9 +1537,28 @@ poll(); setInterval(poll, 3000);
 </script>"""
 
 
+NO_WINDOW = 0x08000000  # Windows: CREATE_NO_WINDOW, so helper commands do not flash a console
+APP_EXE = []  # Windows: where the desktop app ran from, to start it again
+
+
 def quit_app():
     cmd = os.environ.get("CLAUDE_MOVE_QUIT_CMD")
-    subprocess.run(cmd, shell=True) if cmd else subprocess.run(["osascript", "-e", 'tell application "Claude" to quit'], check=False)
+    if cmd:
+        subprocess.run(cmd, shell=True)
+    elif WIN:
+        # ask it to close like the window's close button would, then end it if it only went to the tray
+        mains, procs = app_pids()
+        APP_EXE[:] = [procs[pid][1] for pid in mains][:1]
+        for pid in mains:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T"], capture_output=True, creationflags=NO_WINDOW)
+        for _ in range(20):
+            if not app_running():
+                return True
+            time.sleep(0.5)
+        for pid in mains:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, creationflags=NO_WINDOW)
+    else:
+        subprocess.run(["osascript", "-e", 'tell application "Claude" to quit'], check=False)
     for _ in range(60):
         if not app_running():
             return True
@@ -1380,7 +1568,42 @@ def quit_app():
 
 def open_app():
     cmd = os.environ.get("CLAUDE_MOVE_OPEN_CMD")
-    subprocess.run(cmd, shell=True) if cmd else subprocess.run(["open", "-a", "Claude"], check=False)
+    if cmd:
+        subprocess.run(cmd, shell=True)
+    elif WIN:
+        stub = Path(os.environ.get("LOCALAPPDATA") or HOME / "AppData/Local") / "AnthropicClaude" / "claude.exe"
+        if stub.exists():  # the installer build's launcher, which starts its newest version
+            spawn([str(stub)])
+            return
+        # the Store build has no launcher on disk to run; start it the way the Start menu does
+        ps = ("$a = (Get-StartApps | Where-Object { $_.Name -eq 'Claude' } | Select-Object -First 1).AppID; "
+              "if ($a) { Start-Process ('shell:AppsFolder\\' + $a); exit 0 }; exit 1")
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                           capture_output=True, creationflags=NO_WINDOW)
+        if r.returncode != 0 and APP_EXE:
+            spawn(APP_EXE[:1])
+    else:
+        subprocess.run(["open", "-a", "Claude"], check=False)
+
+
+def spawn(cmd):
+    """Start cmd on its own, so it outlives this process and the desktop app."""
+    kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not WIN:
+        return subprocess.Popen(cmd, start_new_session=True, **kw)
+    flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    try:
+        return subprocess.Popen(cmd, creationflags=flags | 0x01000000, **kw)  # and out of the app's job
+    except OSError:
+        return subprocess.Popen(cmd, creationflags=flags, **kw)
+
+
+def open_path(x):
+    """Open a file, folder or URL the way a double-click would."""
+    if WIN:
+        os.startfile(str(x))
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(x)], check=False)
 
 
 def switch_to(acct, include_all):
@@ -1414,6 +1637,20 @@ def inside_desktop_app():
     """True when this process descends from the Claude desktop app (its terminal pane, a Code session)."""
     if os.environ.get("CLAUDE_MOVE_SKIP_APP_CHECK") == "1":
         return False
+    if WIN:
+        try:
+            procs = win_procs()
+        except (OSError, AttributeError):
+            return False
+        pid = os.getppid()
+        for _ in range(30):
+            if pid not in procs:
+                return False
+            ppid, exe = procs[pid]
+            if desktop_exe(exe):
+                return True
+            pid = ppid
+        return False
     pid = os.getppid()
     for _ in range(30):
         try:
@@ -1435,16 +1672,15 @@ def cmd_panel(args):
     import secrets
     if not args.here and inside_desktop_app():
         # quitting the app from the panel would take this process down with it; run on our own instead
-        app = Path(os.path.expanduser("~/Applications")) / APP_NAME
+        app = app_path()
         if app.exists():
-            subprocess.run(["open", str(app)], check=False)
+            open_path(app)
             print(t("p_detached_app"))
             return
         cmd = [sys.executable, str(Path(__file__).resolve()), "panel", "--here", "--idle", str(args.idle or 1800)]
         for c in args.config or ():
             cmd += ["--config", c]
-        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+        spawn(cmd)
         print(t("p_detached"))
         return
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1458,8 +1694,8 @@ def cmd_panel(args):
             req = urllib.request.Request(base + "/state", headers={"X-Token": tok})
             urllib.request.urlopen(req, timeout=3).read()
             print(t("p_url", u=old["url"]), flush=True)
-            if not args.no_open and sys.platform == "darwin":
-                subprocess.run(["open", old["url"]], check=False)
+            if not args.no_open:
+                open_path(old["url"])
             return
         except (OSError, ValueError):
             pass
@@ -1563,11 +1799,11 @@ def cmd_panel(args):
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{srv.server_port}/?t={token}"
     CONF.mkdir(parents=True, exist_ok=True)
-    PANEL.write_text(json.dumps({"pid": os.getpid(), "url": url}) + "\n")
+    PANEL.write_text(json.dumps({"pid": os.getpid(), "url": url}) + "\n", encoding="utf-8")
     os.chmod(PANEL, 0o600)
     print(t("p_url", u=url), flush=True)
-    if not args.no_open and sys.platform == "darwin":
-        subprocess.run(["open", url], check=False)
+    if not args.no_open:
+        open_path(url)
 
     def idle_watch():  # the open page polls every few seconds, so this only fires after the tab is gone
         while True:
@@ -1588,6 +1824,19 @@ def cmd_panel(args):
 
 
 def pid_alive(pid):
+    if WIN:  # os.kill would end the process on Windows; ask whether it is still running instead
+        try:
+            import ctypes
+            k = kernel32()
+            h = k.OpenProcess(0x1000, False, int(pid))
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            k.GetExitCodeProcess(h, ctypes.byref(code))
+            k.CloseHandle(h)
+            return code.value == 259  # STILL_ACTIVE
+        except (OSError, TypeError, ValueError, AttributeError):
+            return False
     try:
         os.kill(int(pid), 0)
         return True
@@ -1673,6 +1922,99 @@ ICON_PNG = (
 )
 
 
+def app_path(d=None):
+    """Where `app install` puts the launcher: Claude Move.app (macOS) or a Start menu shortcut (Windows)."""
+    if WIN:
+        menu = Path(os.environ.get("APPDATA") or HOME / "AppData/Roaming") / "Microsoft/Windows/Start Menu/Programs"
+        return Path(os.path.expanduser(d)) / "Claude Move.lnk" if d else menu / "Claude Move.lnk"
+    return Path(os.path.expanduser(d or "~/Applications")) / APP_NAME
+
+
+def png_shrink(png, size=256):
+    """The PNG at most size x size, keeping every n-th pixel; only 8-bit, non-interlaced PNGs are shrunk."""
+    import struct
+    import zlib
+    chunks, i = [], 8
+    while i + 8 <= len(png):
+        n, kind = struct.unpack(">I4s", png[i:i + 8])
+        chunks.append((kind, png[i + 8:i + 8 + n]))
+        i += 12 + n
+    w, h, depth, ctype, _, _, lace = struct.unpack(">IIBBBBB", chunks[0][1])
+    ch = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(ctype)
+    step = -(-max(w, h) // size)
+    if step <= 1 or depth != 8 or lace or not ch:
+        return png
+    raw, stride, pos = zlib.decompress(b"".join(d for k, d in chunks if k == b"IDAT")), w * ch, 0
+    rows, prev = [], bytearray(stride)
+    for _ in range(h):  # undo each row's filter (PNG spec, section 9)
+        f, line = raw[pos], bytearray(raw[pos + 1:pos + 1 + stride])
+        pos += 1 + stride
+        for x in range(stride):
+            a, b, c = line[x - ch] if x >= ch else 0, prev[x], prev[x - ch] if x >= ch else 0
+            if f == 1:
+                line[x] = (line[x] + a) & 255
+            elif f == 2:
+                line[x] = (line[x] + b) & 255
+            elif f == 3:
+                line[x] = (line[x] + (a + b) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line)
+        prev = line
+    out = b"".join(b"\0" + b"".join(bytes(r[x:x + ch]) for x in range(0, stride, step * ch)) for r in rows[::step])
+    chunk = lambda k, d: struct.pack(">I", len(d)) + k + d + struct.pack(">I", zlib.crc32(k + d))
+    head = chunk(b"IHDR", struct.pack(">IIBBBBB", -(-w // step), -(-h // step), 8, ctype, 0, 0, 0))
+    keep = b"".join(chunk(k, d) for k, d in chunks if k in (b"PLTE", b"tRNS"))
+    return png[:8] + head + keep + chunk(b"IDAT", zlib.compress(out, 9)) + chunk(b"IEND", b"")
+
+
+def png_to_ico(png):
+    """An .ico holding one PNG image, as Windows Vista and later read them."""
+    import struct
+    w, h = struct.unpack(">II", png[16:24])
+    return (struct.pack("<HHH", 0, 1, 1)
+            + struct.pack("<BBBBHHII", w % 256, h % 256, 0, 0, 1, 32, len(png), 22) + png)
+
+
+def win_desktop():
+    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                          "[Environment]::GetFolderPath('Desktop')"], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", creationflags=NO_WINDOW).stdout.strip()
+    return Path(out) if out else HOME / "Desktop"
+
+
+def app_install_win(args, lnk):
+    """A Start menu shortcut (and one on the desktop) that runs the panel under pythonw, without a console."""
+    import base64
+    if args.icon:
+        data = Path(os.path.expanduser(args.icon)).read_bytes()
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            data = png_to_ico(png_shrink(data))
+        elif data[:4] != b"\0\0\1\0":
+            sys.exit(t("a_win_icon"))
+    else:
+        data = png_to_ico(png_shrink(base64.b64decode("".join(ICON_PNG))))
+    ico = CONF / "claude-move.ico"
+    CONF.mkdir(parents=True, exist_ok=True)
+    ico.write_bytes(data)
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    links = [lnk] + ([] if args.no_dock else [win_desktop() / lnk.name])
+    ps = ("$w = New-Object -ComObject WScript.Shell; foreach ($p in $env:CM_LINKS.Split('|')) { "
+          "$s = $w.CreateShortcut($p); $s.TargetPath = $env:CM_TARGET; $s.Arguments = $env:CM_ARGS; "
+          "$s.WorkingDirectory = $env:USERPROFILE; $s.IconLocation = $env:CM_ICON; "
+          "$s.Description = 'claude-move panel'; $s.Save() }")
+    lnk.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, CM_LINKS="|".join(map(str, links)), CM_ICON=str(ico),
+               CM_TARGET=str(pyw if pyw.exists() else sys.executable),
+               CM_ARGS=f'"{Path(__file__).resolve()}" panel --here --idle 1800')
+    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env, check=True,
+                   capture_output=True, creationflags=NO_WINDOW)
+    print(t("a_done", p=lnk))
+    if not args.no_dock:
+        print(t("a_dock"))
+
+
 def dock_has(app):
     out = subprocess.run(["defaults", "read", "com.apple.dock", "persistent-apps"], capture_output=True, text=True).stdout
     return app.as_uri() in out
@@ -1683,12 +2025,18 @@ def cmd_app(args):
     from the panel does not stop it; the panel stops 30 minutes after its page is closed."""
     import base64
     import tempfile
-    app = Path(os.path.expanduser(args.dir)) / APP_NAME
+    app = app_path(args.dir)
     if args.action == "uninstall":
-        if app.exists():
+        if WIN:
+            for f in (app, win_desktop() / app.name):
+                if f.exists():
+                    f.unlink()
+        elif app.exists():
             shutil.rmtree(app)
         print(t("a_removed", p=app))
         return
+    if WIN:
+        return app_install_win(args, app)
     if sys.platform != "darwin":
         sys.exit(t("a_mac"))
     tool = Path(__file__).resolve()
@@ -1754,6 +2102,8 @@ def settings_path():
 
 
 def recorder_command():
+    if WIN:  # Claude Code may run it through Git Bash, which eats backslashes; quoted forward slashes work in both
+        return f'"{console_python().as_posix()}" "{Path(__file__).resolve().as_posix()}" watch record'
     return f"{sys.executable} {Path(__file__).resolve()} watch record"
 
 
@@ -1787,10 +2137,10 @@ def watch_set(sp, on):
         prev = s.get("statusLine")
         state[str(sp)] = {"previous": prev}
         CONF.mkdir(parents=True, exist_ok=True)
-        WATCH.write_text(json.dumps(state, indent=2) + "\n")
+        WATCH.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
         s["statusLine"] = {"type": "command", "command": recorder_command()}
         sp.parent.mkdir(parents=True, exist_ok=True)
-        sp.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n")
+        sp.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(t("w_on", p=sp))
         if prev:
             print(t("w_chain"))
@@ -1804,13 +2154,15 @@ def watch_set(sp, on):
             s["statusLine"] = prev
         else:
             s.pop("statusLine", None)
-        sp.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n")
-        WATCH.write_text(json.dumps(state, indent=2) + "\n")
+        sp.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        WATCH.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
         print(t("w_off", p=sp))
 
 
 def watch_record(sp, state):
     """Status line hook: save the official rate limits for the signed-in account, then show the old status line."""
+    if WIN:  # Claude Code reads the status line as UTF-8, not in the console's code page
+        sys.stdout.reconfigure(encoding="utf-8")
     raw = sys.stdin.read()
     shown = ""
     try:
@@ -1834,12 +2186,27 @@ def watch_record(sp, state):
     prev = (state.get(str(sp)) or {}).get("previous")
     if isinstance(prev, dict) and prev.get("command"):
         try:
-            out = subprocess.run(prev["command"], shell=True, input=raw, capture_output=True, text=True, timeout=5).stdout
+            bash = WIN and git_bash()
+            run = [bash, "-c", prev["command"]] if bash else prev["command"]
+            out = subprocess.run(run, shell=not bash, input=raw, capture_output=True, text=True, encoding="utf-8",
+                                 errors="replace", timeout=5).stdout
             print(out.rstrip("\n"))
             return
         except (OSError, subprocess.SubprocessError):
             pass
     print(shown)
+
+
+def git_bash():
+    """Windows: the Git Bash Claude Code runs commands with (never WSL's bash.exe in System32)."""
+    p = os.environ.get("CLAUDE_CODE_GIT_BASH_PATH")
+    if p and Path(p).exists():
+        return p
+    git = shutil.which("git")
+    for c in ([Path(git).parents[1] / "bin/bash.exe", Path(git).parents[1] / "usr/bin/bash.exe"] if git else []):
+        if c.exists():
+            return str(c)
+    return None
 
 
 # ---------- notifications
@@ -1852,15 +2219,25 @@ def notify_conf():
 
 
 def notify(title, body):
-    """A macOS notification. It never fails: the status line recorder calls it too."""
+    """A system notification (macOS, or a Windows toast). It never fails: the status line recorder calls it too."""
     cmd = os.environ.get("CLAUDE_MOVE_NOTIFY_CMD")
     try:
         if cmd:
-            subprocess.run(cmd, shell=True, input=f"{title}\n{body}\n", text=True, timeout=10)
+            subprocess.run(cmd, shell=True, input=f"{title}\n{body}\n", text=True, encoding="utf-8", timeout=10)
         elif sys.platform == "darwin":
             script = (f"display notification {json.dumps(body, ensure_ascii=False)} "
                       f"with title {json.dumps(title, ensure_ascii=False)}")
             subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+        elif WIN:  # the text goes in through the environment, so nothing in it needs quoting
+            ps = ("$m = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; "
+                  "$x = $m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
+                  "$n = $x.GetElementsByTagName('text'); "
+                  "[void]$n.Item(0).AppendChild($x.CreateTextNode($env:CLAUDE_MOVE_N_TITLE)); "
+                  "[void]$n.Item(1).AppendChild($x.CreateTextNode($env:CLAUDE_MOVE_N_BODY)); "
+                  "$m::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe')"
+                  ".Show([Windows.UI.Notifications.ToastNotification]::new($x))")
+            subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, timeout=15,
+                           env=dict(os.environ, CLAUDE_MOVE_N_TITLE=title, CLAUDE_MOVE_N_BODY=body), creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -1986,8 +2363,22 @@ def copy_session(src_cfg, dst_cfg, sid):
 
 def restore_tty():
     if sys.stdin.isatty():
-        subprocess.run(["stty", "sane"], check=False)
+        if not WIN:
+            subprocess.run(["stty", "sane"], check=False)
         sys.stderr.write("\033[?25h\n")
+
+
+def stop_child(child):
+    """End claude so its transcript can be copied. On Windows the whole tree: an npm install runs it under a .cmd."""
+    if WIN:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(child.pid)], capture_output=True)
+    else:
+        child.terminate()
+    try:
+        child.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait()
 
 
 def cmd_run(args):
@@ -2051,12 +2442,7 @@ def cmd_run(args):
             restore_tty()
             print(t("run_none", a=who), file=sys.stderr)
             finish(child.returncode if child.returncode >= 0 else 1)
-        child.terminate()
-        try:
-            child.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            child.kill()
-            child.wait()
+        stop_child(child)
         restore_tty()
         k = t("u_kind_week") if hit["kind"] == "seven_day" else t("u_kind_5h")
         print(t("run_hit", a=who, k=k, w=clock(skip[acct])), file=sys.stderr)
@@ -2125,11 +2511,13 @@ def doctor_items(extra=()):
         c = dirs[0]
         if (logins.get(str(c)) or {}).get("ok") is False or recorder_on(c):
             continue
-        fix = "claude-move watch install" if c == HOME / ".claude" else f"CLAUDE_CONFIG_DIR={short(c)} claude-move watch install"
+        fix = env_cmd(c, "claude-move watch install")
         add("cli", t("d_watch", d=short(c), c=fix), True, {"do": "watch", "acct": acct})
     conf = notify_conf()
     add("misc", t("d_notify_on", l="/".join(map(str, conf["levels"]))) if conf["on"] else t("d_notify_off"))
-    app = Path(os.path.expanduser("~/Applications")) / APP_NAME
+    app = app_path()
+    if WIN and app.exists():
+        add("misc", t("d_app_ok"))
     if sys.platform == "darwin" and app.exists():
         ok = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True).returncode == 0
         add("misc", t("d_app_ok" if ok else "d_app_bad"), not ok)
@@ -2202,13 +2590,11 @@ def claim_logins():
 
 
 def open_login(cfg, who):
-    """A Terminal window running the CLI's own `claude auth login` for this config folder."""
-    from shlex import quote
+    """A terminal window running the CLI's own `claude auth login` for this config folder."""
     exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
-    lines = ["#!/bin/sh", "cd ~ || exit 1", f"export CLAUDE_CONFIG_DIR={quote(str(cfg))}",
-             f"echo {quote(t('l_head', d=short(cfg)))}", f"echo {quote(t('l_hint', a=who))}",
-             f"{quote(exe)} auth login --claudeai", f"echo {quote(t('l_done'))}"]
-    open_command(CONF / "term" / f"login-{cfg.name.lstrip('.')}.command", "\n".join(lines) + "\n")
+    open_command(term_script(f"login-{cfg.name.lstrip('.')}", None, {"CLAUDE_CONFIG_DIR": cfg},
+                             [exe, "auth", "login", "--claudeai"],
+                             before=[t("l_head", d=short(cfg)), t("l_hint", a=who)], after=[t("l_done")]))
 
 
 def check_update():
@@ -2650,11 +3036,17 @@ def tools_js():
 
 
 def main(argv=None):
+    if WIN:
+        for name in ("stdout", "stderr"):
+            if getattr(sys, name) is None:  # pythonw (the Start menu shortcut) has no console to print to
+                setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
+            elif hasattr(getattr(sys, name), "reconfigure"):  # a code page without some character must not stop a move
+                getattr(sys, name).reconfigure(errors="replace")
     p = argparse.ArgumentParser(prog="claude-move",
                                 description="Move the Claude desktop app's Code session list between accounts (copy only).")
     p.add_argument("--version", action="version", version=f"claude-move {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("list", help="accounts on this Mac and their session counts").set_defaults(fn=cmd_list)
+    sub.add_parser("list", help="accounts on this computer and their session counts").set_defaults(fn=cmd_list)
     s = sub.add_parser("sessions", help="live sessions of one account")
     s.add_argument("account")
     s.set_defaults(fn=cmd_sessions)
@@ -2697,11 +3089,12 @@ def main(argv=None):
     pn.add_argument("--idle", type=float, default=0, help="stop after this many seconds without the page open (default: never)")
     pn.add_argument("--config", action="append", help="also read transcripts from this CLI config folder (repeatable)")
     pn.set_defaults(fn=cmd_panel)
-    ap = sub.add_parser("app", help="install a double-clickable Claude Move.app that opens the panel (macOS)")
+    ap = sub.add_parser("app", help="install a double-clickable launcher that opens the panel: Claude Move.app on "
+                                    "macOS, a Start menu shortcut on Windows")
     ap.add_argument("action", choices=["install", "uninstall"])
-    ap.add_argument("--dir", default="~/Applications", help="where to put Claude Move.app (default ~/Applications)")
-    ap.add_argument("--no-dock", action="store_true", help="do not add it to the Dock")
-    ap.add_argument("--icon", help="use this image (PNG/JPEG, ideally 1024x1024) as the app icon")
+    ap.add_argument("--dir", help="where to put it (default ~/Applications; on Windows the Start menu)")
+    ap.add_argument("--no-dock", action="store_true", help="do not add it to the Dock (Windows: no desktop shortcut)")
+    ap.add_argument("--icon", help="use this image as the icon (PNG/JPEG, ideally 1024x1024; on Windows PNG or ICO)")
     ap.set_defaults(fn=cmd_app)
     tm = sub.add_parser("term", help="open a Terminal window running Claude Code with that account's CLI login")
     tm.add_argument("account", help="label or id prefix of an account signed in under ~/.claude or ~/.claude-*")
@@ -2718,7 +3111,7 @@ def main(argv=None):
     rn.add_argument("--config", action="append", help="also use this CLI config folder (repeatable)")
     rn.add_argument("claude_args", nargs="*", help="more arguments for claude, after --")
     rn.set_defaults(fn=cmd_run)
-    nt = sub.add_parser("notify", help="macOS notifications when an account's official %% passes 75/90/95%%")
+    nt = sub.add_parser("notify", help="system notifications when an account's official %% passes 75/90/95%%")
     nt.add_argument("action", choices=["on", "off", "status", "test"])
     nt.add_argument("--levels", help="comma-separated levels, e.g. 80,95")
     nt.set_defaults(fn=cmd_notify)

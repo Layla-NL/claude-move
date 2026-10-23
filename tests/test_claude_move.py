@@ -12,6 +12,41 @@ from pathlib import Path
 FIVE_H = 5 * 3600
 TOOL = Path(__file__).resolve().parents[1] / "claude-move"
 NOW = int(time.time() * 1000)
+WIN = sys.platform == "win32"
+os.environ["PYTHONIOENCODING"] = "utf-8"  # the tool prints "·" and Chinese; read it the same everywhere
+SCRIPT = ".cmd" if WIN else ".command"  # what the terminal buttons write
+
+
+def py_cmd(code, *args):
+    """A shell command running Python code, quoted so that both sh and cmd.exe read it the same way."""
+    return " ".join([f'"{sys.executable}"', "-c", f'"{code}"'] + [f'"{a}"' for a in args])
+
+
+NOOP = py_cmd("pass")
+touch_cmd = lambda p: py_cmd("import sys, pathlib; pathlib.Path(sys.argv[1]).touch()", p)
+append_cmd = lambda p: py_cmd("import sys; open(sys.argv[1], 'a', encoding='utf-8').write(sys.stdin.read())", p)
+
+
+def stub(path, code):
+    """A fake claude written in Python, behind a launcher the tool runs like an executable (a .cmd on Windows)."""
+    src = path.with_suffix(".py")
+    src.write_text("import json, os, sys, time, pathlib\nsys.stdout.reconfigure(encoding='utf-8')\n" + code, encoding="utf-8")
+    if WIN:
+        exe = path.with_suffix(".cmd")
+        exe.write_text(f'@"{sys.executable}" "{src}" %*\r\n')
+        return exe
+    path.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{src}" "$@"\n')
+    path.chmod(0o755)
+    return path
+
+
+def load_tool(name="cm"):
+    import importlib.machinery, importlib.util
+    loader = importlib.machinery.SourceFileLoader(name, str(TOOL))
+    spec = importlib.util.spec_from_loader(name, loader)
+    cm = importlib.util.module_from_spec(spec)
+    loader.exec_module(cm)
+    return cm
 
 
 def write(p, **d):
@@ -38,7 +73,7 @@ class ClaudeMove(unittest.TestCase):
         env = dict(os.environ, CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root),
                    CLAUDE_MOVE_DESKTOP_CONFIG=str(self.home / "desk"),
                    CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1")
-        return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, env=env)
+        return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, encoding="utf-8", env=env)
 
     def test_list_marks_most_recent(self):
         r = self.run_tool("list")
@@ -136,6 +171,8 @@ class ClaudeMove(unittest.TestCase):
         proj = other / "projects" / "-tmp-my-app"
         proj.mkdir(parents=True)
         (proj / "s2.jsonl").write_text("{}\n")
+        if WIN:  # an absolute path there starts with the drive: C:\\tmp\\my.app is C--tmp-my-app
+            proj.rename(other / "projects" / "".join(c if c.isalnum() else "-" for c in os.path.abspath("/tmp/my.app")))
         r = self.run_tool("import-cli", "--config", str(other), "--project", "/tmp/my.app", "--dry-run")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("s2", r.stdout)
@@ -176,7 +213,7 @@ class Usage(unittest.TestCase):
             write(self.root / acct / "org" / "local_1.json", sessionId="local_1", cliSessionId="s1",
                   lastActivityAt=int(self.now * 1000))
         switch = self.now - 3600
-        log = self.home / "Library/Logs/Claude/main.log"
+        self.log = log = self.home / ("logs" if WIN else "Library/Logs/Claude") / "main.log"
         log.parent.mkdir(parents=True)
         stamp = lambda s: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(s))
         log.write_text(f"{stamp(self.now - 86400)} [info] [oauth-v2] lookup orgId=x cacheKey=acct:{a}|y:x:https:/\n"
@@ -197,7 +234,8 @@ class Usage(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
         env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
                    CLAUDE_MOVE_LANG="en", **env_extra)
-        return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, env=env, input=stdin)
+        return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, encoding="utf-8", env=env,
+                              input=stdin)
 
     def test_attribution_cooling_and_pick(self):
         self.run_tool("name", "aaaa", "first")
@@ -269,13 +307,10 @@ class Usage(unittest.TestCase):
                       {"kind": "weekly_all", "group": "weekly", "percent": 41, "resets_at": soon, "severity": "ok", "is_active": True},
                       {"kind": "weekly_scoped", "group": "weekly", "percent": 12, "resets_at": soon,
                        "scope": {"model": {"display_name": "Opus"}}, "severity": "ok", "is_active": True}]}}}
-        stub = self.home / "claude"
-        stub.write_text("#!/bin/sh\n"
-                        f"if [ \"$CLAUDE_CONFIG_DIR\" = \"{good}\" ]; then echo '{json.dumps(report)}'; "
-                        "else echo 'Not logged in · Please run /login'; fi\n")
-        stub.chmod(0o755)
+        exe = stub(self.home / "claude", f"print({json.dumps(report)!r} if os.environ.get('CLAUDE_CONFIG_DIR') == {str(good)!r} "
+                                         "else 'Not logged in · Please run /login')\n")
         self.run_tool("name", "bbbb", "second")
-        r = self.run_tool("usage", "--refresh", CLAUDE_MOVE_CLAUDE=str(stub))
+        r = self.run_tool("usage", "--refresh", CLAUDE_MOVE_CLAUDE=str(exe))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("~/.claude-second: second  week 41% · week · Opus 12% · 5h 100%", r.stdout)
         self.assertIn("~/.claude-old: no plan usage", r.stdout)
@@ -288,13 +323,14 @@ class Usage(unittest.TestCase):
         self.assertIn("week · Opus", (self.home / ".config/claude-move/usage.html").read_text())
 
 
+    @unittest.skipIf(WIN, "checks the sh script; test_windows_scripts covers the .cmd one")
     def test_term_runs_claude_with_that_login(self):
         c = self.home / ".claude-second"
         c.mkdir()
         (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
         (self.home / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))  # stale profile
         self.run_tool("name", "bbbb", "second")
-        r = self.run_tool("term", "second", CLAUDE_MOVE_TERM_CMD="true", CLAUDE_MOVE_CLAUDE="/opt/x/claude")
+        r = self.run_tool("term", "second", CLAUDE_MOVE_TERM_CMD=NOOP, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("CLAUDE_CONFIG_DIR=~/.claude-second claude", r.stdout)
         script = self.home / ".config/claude-move/term/claude-second.command"
@@ -306,13 +342,13 @@ class Usage(unittest.TestCase):
         (c / "projects/-app").mkdir(parents=True)
         (c / "projects/-app/s.jsonl").write_text(json.dumps({"type": "summary"}) + "\n"
                                                 + json.dumps({"type": "user", "cwd": str(proj / ".claude/worktrees/w1")}) + "\n")
-        r = self.run_tool("term", "second", "--rc", CLAUDE_MOVE_TERM_CMD="true", CLAUDE_MOVE_CLAUDE="/opt/x/claude")
+        r = self.run_tool("term", "second", "--rc", CLAUDE_MOVE_TERM_CMD=NOOP, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("--remote-control second", r.stdout)
         lines = (self.home / ".config/claude-move/term/claude-second-rc.command").read_text().splitlines()
         self.assertEqual(lines[1], f"cd {proj} 2>/dev/null || cd ~ || exit 1")
         self.assertEqual(lines[3], "exec /opt/x/claude --remote-control second")
-        r = self.run_tool("term", "aaaa", CLAUDE_MOVE_TERM_CMD="true")  # has sessions, but no CLI login
+        r = self.run_tool("term", "aaaa", CLAUDE_MOVE_TERM_CMD=NOOP)  # has sessions, but no CLI login
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("No CLI login", r.stderr)
 
@@ -338,10 +374,11 @@ class Panel(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
         env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
                    CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1",
-                   CLAUDE_MOVE_QUIT_CMD=f"touch {self.home}/quit", CLAUDE_MOVE_OPEN_CMD=f"touch {self.home}/open",
-                   CLAUDE_MOVE_TERM_CMD=f"touch {self.home}/term; true",
-                   CLAUDE_MOVE_UPDATE_URL=(self.home / "rel.json").as_uri(), CLAUDE_MOVE_NOTIFY_CMD="true")
-        self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open"], stdout=subprocess.PIPE, text=True, env=env)
+                   CLAUDE_MOVE_QUIT_CMD=touch_cmd(self.home / "quit"), CLAUDE_MOVE_OPEN_CMD=touch_cmd(self.home / "open"),
+                   CLAUDE_MOVE_TERM_CMD=touch_cmd(self.home / "term"),
+                   CLAUDE_MOVE_UPDATE_URL=(self.home / "rel.json").as_uri(), CLAUDE_MOVE_NOTIFY_CMD=NOOP)
+        self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open"], stdout=subprocess.PIPE, text=True,
+                                     encoding="utf-8", env=env)
         self.addCleanup(lambda: (self.proc.kill(), self.proc.wait(), self.proc.stdout.close()))
         line = self.proc.stdout.readline()
         m = re.search(r"http://127\.0\.0\.1:(\d+)/\?t=(\S+)", line)
@@ -363,7 +400,7 @@ class Panel(unittest.TestCase):
         # a third account the app is signed into now, with an empty list (just opened the Code tab)
         c = "cccccccc-0000-0000-0000-000000000003"
         (self.root / c / "org").mkdir(parents=True)
-        log = self.home / "Library/Logs/Claude/main.log"
+        log = self.log
         stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.now - 10))
         log.write_text(log.read_text() + f"{stamp} [info] [oauth-v2] lookup orgId=x cacheKey=acct:{c}|y:x:https:/\n")
         self.start()
@@ -391,7 +428,9 @@ class Panel(unittest.TestCase):
         self.start()
         page = self.call(f"/?t={self.token}", token=False)[1]
         self.assertIn(f'data-term="{self.b}" data-rc="1"', page)
-        self.assertIn(f'data-copy="CLAUDE_CONFIG_DIR=~/.claude-second claude --remote-control bbbbbbbb"', page)
+        copy = (f"$env:CLAUDE_CONFIG_DIR=&#x27;{c}&#x27;; claude --remote-control &#x27;bbbbbbbb&#x27;" if WIN
+                else "CLAUDE_CONFIG_DIR=~/.claude-second claude --remote-control bbbbbbbb")
+        self.assertIn(f'data-copy="{copy}"', page)
         self.assertEqual(self.call("/terminal", {"acct": self.a})[0], 404)  # no CLI login for this one
         self.assertEqual(self.call("/terminal", {"acct": ""})[0], 404)
         self.assertFalse((self.home / "term").exists())
@@ -399,12 +438,12 @@ class Panel(unittest.TestCase):
         code, body = self.call("/terminal", {"acct": self.b})
         self.assertEqual(code, 200, body)
         self.assertTrue((self.home / "term").exists())
-        self.assertIn(f"CLAUDE_CONFIG_DIR={c}", (self.home / ".config/claude-move/term/claude-second.command").read_text())
+        self.assertIn(f"CLAUDE_CONFIG_DIR={c}", (self.home / f".config/claude-move/term/claude-second{SCRIPT}").read_text())
         self.assertEqual(self.call("/terminal", {"acct": self.b, "rc": True})[0], 200)
-        self.assertIn("--remote-control bbbbbbbb", (self.home / ".config/claude-move/term/claude-second-rc.command").read_text())
+        self.assertIn("--remote-control bbbbbbbb", (self.home / f".config/claude-move/term/claude-second-rc{SCRIPT}").read_text())
         self.assertIn('id="auto"', page)
         self.assertEqual(self.call("/terminal", {"acct": self.b, "auto": True})[0], 200)
-        auto = (self.home / ".config/claude-move/term/claude-second-auto.command").read_text()
+        auto = (self.home / f".config/claude-move/term/claude-second-auto{SCRIPT}").read_text()
         self.assertIn(f"run --config {c} {self.b}", auto)
 
     def test_panel_tools(self):
@@ -447,7 +486,7 @@ class Panel(unittest.TestCase):
         # add a CLI login: the official sign-in in a Terminal window; the new account is named once it shows up
         self.assertFalse(api("login", {"name": "a b"})["ok"])
         self.assertTrue(api("login", {"name": "new"})["ok"])
-        self.assertIn("auth login --claudeai", (self.home / ".config/claude-move/term/login-claude-new.command").read_text())
+        self.assertIn("auth login --claudeai", (self.home / f".config/claude-move/term/login-claude-new{SCRIPT}").read_text())
         n = "dddddddd-0000-0000-0000-000000000004"
         (self.home / ".claude-new/.claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": n}}))
         self.call("/state")
@@ -556,42 +595,49 @@ class Run(unittest.TestCase):
             {"kind": "weekly_all", "percent": 41, "resets_at": soon}]}}}
         hit = limit_hit("x", self.now, "five_hour", int(self.now + 3600), entry="cli")
         argv = self.home / "argv"
-        stub = self.home / "claude"
         # the stub claude: /usage answers for both; in the first login it hits the limit and waits like the TUI does
-        stub.write_text("#!/bin/sh\n"
-                        "for a in \"$@\"; do case \"$prev\" in --session-id|--resume) SID=\"$a\";; esac; prev=\"$a\"; done\n"
-                        f"case \" $* \" in *\" -p \"*) echo '{json.dumps(report)}'; exit 0;; esac\n"
-                        "D=\"$CLAUDE_CONFIG_DIR/projects/-p\"; mkdir -p \"$D\"\n"
-                        f"if [ \"$CLAUDE_CONFIG_DIR\" = \"{a_cfg}\" ]; then echo '{{\"type\":\"user\"}}' >> \"$D/$SID.jsonl\"; "
-                        f"echo '{json.dumps(hit)}' >> \"$D/$SID.jsonl\"; exec sleep 30; fi\n"
-                        f"printf '%s\\n' \"$@\" > {argv}; echo '{{\"type\":\"user\",\"b\":1}}' >> \"$D/$SID.jsonl\"; exit 0\n")
-        stub.chmod(0o755)
+        exe = stub(self.home / "claude", f"""
+a = sys.argv[1:]
+sid = next(a[i + 1] for i, x in enumerate(a[:-1]) if x in ("--session-id", "--resume")) if "-p" not in a else None
+if sid is None:
+    print({json.dumps(report)!r}); sys.exit(0)
+d = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-p"
+d.mkdir(parents=True, exist_ok=True)
+f = (d / (sid + ".jsonl")).open("a", encoding="utf-8")
+if os.environ["CLAUDE_CONFIG_DIR"] == {str(a_cfg)!r}:
+    f.write('{{"type":"user"}}\\n' + {json.dumps(hit)!r} + "\\n"); f.close(); time.sleep(30); sys.exit(0)
+pathlib.Path({str(argv)!r}).write_text("\\n".join(a) + "\\n", encoding="utf-8")
+f.write('{{"type":"user","b":1}}\\n'); f.close()
+""")
         sent = self.home / "sent"
-        r = self.run_tool("run", "first", "--rc", CLAUDE_MOVE_CLAUDE=str(stub), CLAUDE_MOVE_POLL="0.1",
-                          CLAUDE_MOVE_NOTIFY_CMD=f"cat >> {sent}")
+        r = self.run_tool("run", "first", "--rc", CLAUDE_MOVE_CLAUDE=str(exe), CLAUDE_MOVE_POLL="0.1",
+                          CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("first hit its 5-hour limit", r.stderr)
         self.assertIn("Moving this session to second", r.stderr)
-        args = argv.read_text().splitlines()
+        args = argv.read_text(encoding="utf-8").splitlines()
         sid = args[args.index("--resume") + 1]
         self.assertEqual(args[args.index("--remote-control") + 1], "second")
         self.assertIn("Continue where you left off", args[-1])
         moved = (b_cfg / "projects/-p" / f"{sid}.jsonl").read_text().splitlines()
         self.assertEqual(len(moved), 3)  # first's two lines, then second's own
         self.assertEqual(len((a_cfg / "projects/-p" / f"{sid}.jsonl").read_text().splitlines()), 2)  # source untouched
-        self.assertIn("first hit its limit; the session moved to second", sent.read_text())
+        self.assertIn("first hit its limit; the session moved to second", sent.read_text(encoding="utf-8"))
 
     def test_run_stays_when_no_other_account(self):
         a_cfg, _ = self.logins()
         hit = limit_hit("x", self.now, "seven_day", int(self.now + 3600), entry="cli")
-        stub = self.home / "claude"
-        stub.write_text("#!/bin/sh\n"
-                        "for a in \"$@\"; do case \"$prev\" in --session-id) SID=\"$a\";; esac; prev=\"$a\"; done\n"
-                        "case \" $* \" in *\" -p \"*) echo 'Not logged in'; exit 0;; esac\n"
-                        "D=\"$CLAUDE_CONFIG_DIR/projects/-p\"; mkdir -p \"$D\"\n"
-                        f"echo '{json.dumps(hit)}' >> \"$D/$SID.jsonl\"; sleep 1; exit 3\n")
-        stub.chmod(0o755)
-        r = self.run_tool("run", "first", CLAUDE_MOVE_CLAUDE=str(stub), CLAUDE_MOVE_POLL="0.1", CLAUDE_MOVE_NOTIFY_CMD="true")
+        exe = stub(self.home / "claude", f"""
+a = sys.argv[1:]
+if "-p" in a:
+    print("Not logged in"); sys.exit(0)
+d = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-p"
+d.mkdir(parents=True, exist_ok=True)
+with (d / (a[a.index("--session-id") + 1] + ".jsonl")).open("a", encoding="utf-8") as f:
+    f.write({json.dumps(hit)!r} + "\\n")
+time.sleep(1); sys.exit(3)
+""")
+        r = self.run_tool("run", "first", CLAUDE_MOVE_CLAUDE=str(exe), CLAUDE_MOVE_POLL="0.1", CLAUDE_MOVE_NOTIFY_CMD=NOOP)
         self.assertEqual(r.returncode, 3)  # claude was left alone and its exit code passed through
         self.assertIn("No other account to move to", r.stderr)
 
@@ -604,22 +650,22 @@ class Run(unittest.TestCase):
 
         def record(pct, at=reset):
             line = json.dumps({"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": at}}})
-            return self.run_tool("watch", "record", stdin=line, CLAUDE_CONFIG_DIR=str(cfg), CLAUDE_MOVE_NOTIFY_CMD=f"cat >> {sent}")
+            return self.run_tool("watch", "record", stdin=line, CLAUDE_CONFIG_DIR=str(cfg), CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent))
 
         record(50)
         self.assertFalse(sent.exists())
         record(91)
         record(92)
-        self.assertEqual(sent.read_text().count("5h limit 9"), 1)
+        self.assertEqual(sent.read_text(encoding="utf-8").count("5h limit 9"), 1)
         record(96)
         record(10, reset + FIVE_H)  # next window: starts over, nothing to say yet
         record(80, reset + FIVE_H)
-        self.assertEqual([ln for ln in sent.read_text().splitlines() if "limit" in ln],
+        self.assertEqual([ln for ln in sent.read_text(encoding="utf-8").splitlines() if "limit" in ln],
                          [f"bbbbbbbb: 5h limit 91% used · resets {fmt(reset)}", f"bbbbbbbb: 5h limit 96% used · resets {fmt(reset)}",
                           f"bbbbbbbb: 5h limit 80% used · resets {fmt(reset + FIVE_H)}"])
         self.assertIn("off", self.run_tool("notify", "off").stdout)
         record(99, reset + FIVE_H)
-        self.assertEqual(sent.read_text().count("limit"), 3)
+        self.assertEqual(sent.read_text(encoding="utf-8").count("limit"), 3)
         self.assertIn("80/95", self.run_tool("notify", "on", "--levels", "95,80").stdout)
 
     def test_doctor(self):
@@ -637,6 +683,77 @@ class Run(unittest.TestCase):
 
 def fmt(ts):
     return time.strftime("%m-%d %H:%M", time.localtime(ts))
+
+
+class Windows(unittest.TestCase):
+    """The Windows branches: the scripts, commands and icon are checked on any OS; the rest only on Windows."""
+
+    def setUp(self):
+        self.cm = load_tool("cmw")
+        self.cm.WIN, self.cm.ZH = True, False
+
+    def test_windows_scripts(self):
+        cm = self.cm
+        path, body = cm.term_script("login-claude-new", None, {"CLAUDE_CONFIG_DIR": r"C:\Users\Lay la\.claude-new"},
+                                    [r"C:\Users\Lay la\AppData\Roaming\npm\claude.cmd", "auth", "login", "--claudeai"],
+                                    before=["Sign in (100% & done) <now>"], after=["ok"])
+        self.assertEqual(path.name, "login-claude-new.cmd")
+        self.assertEqual(body.split("\r\n"), [
+            "@echo off", "chcp 65001 >nul", 'cd /d "%USERPROFILE%"', r'set "CLAUDE_CONFIG_DIR=C:\Users\Lay la\.claude-new"',
+            "echo(Sign in ^(100%% ^& done^) ^<now^>",
+            r'call "C:\Users\Lay la\AppData\Roaming\npm\claude.cmd" auth login --claudeai', "echo(ok", ""])
+        _, body = cm.term_script("claude-rc", r"D:\work\app", {"CLAUDE_CONFIG_DIR": None}, ["claude", "--remote-control", "it's me"])
+        self.assertIn(r'cd /d D:\work\app 2>nul || cd /d "%USERPROFILE%"', body)
+        self.assertIn('set "CLAUDE_CONFIG_DIR="\r\nclaude --remote-control "it\'s me"', body)
+        cfg = cm.HOME / ".claude-gmail"
+        self.assertEqual(cm.env_cmd(cfg, "claude"), f"$env:CLAUDE_CONFIG_DIR='{cfg}'; claude")
+        self.assertEqual(cm.env_cmd(cm.HOME / ".claude", "claude"), "claude")
+        self.assertIn("PowerShell", cm.t("t_none", t="x"))
+        self.assertIn("this computer", cm.t("p_url", u="u"))
+
+    def test_windows_desktop_app_is_told_from_the_cli(self):
+        cm = self.cm
+        self.assertTrue(cm.desktop_exe(r"C:\Users\x\AppData\Local\AnthropicClaude\app-1.2.3\claude.exe"))
+        self.assertTrue(cm.desktop_exe(r"C:\Program Files\WindowsApps\Claude_1.9659.2.0_x64__pzs8sxrjxfjjc\app\Claude.exe"))
+        self.assertFalse(cm.desktop_exe(r"C:\Users\x\.local\bin\claude.exe"))
+        self.assertFalse(cm.desktop_exe(r"C:\Program Files\nodejs\node.exe"))
+
+    def test_icon(self):
+        import base64
+        import struct
+        png = self.cm.png_shrink(base64.b64decode("".join(self.cm.ICON_PNG)))
+        self.assertEqual(struct.unpack(">II", png[16:24]), (256, 256))
+        ico = self.cm.png_to_ico(png)
+        self.assertEqual(ico[:6], b"\0\0\1\0\1\0")
+        self.assertEqual(ico[22:], png)
+
+    @unittest.skipUnless(WIN, "Windows only")
+    def test_start_menu_shortcut(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, CLAUDE_MOVE_HOME=tmp, CLAUDE_MOVE_LANG="en")
+            r = subprocess.run([sys.executable, str(TOOL), "app", "install", "--dir", tmp, "--no-dock"],
+                               capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue((Path(tmp) / "Claude Move.lnk").stat().st_size > 0)
+            self.assertTrue((Path(tmp) / ".config/claude-move/claude-move.ico").exists())
+            r = subprocess.run([sys.executable, str(TOOL), "app", "uninstall", "--dir", tmp],
+                               capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse((Path(tmp) / "Claude Move.lnk").exists())
+
+    @unittest.skipUnless(WIN, "Windows only")
+    def test_processes(self):
+        cm = load_tool("cmw2")
+        procs = cm.win_procs()
+        self.assertEqual(procs[os.getpid()][0], os.getppid())
+        self.assertTrue(cm.pid_alive(os.getpid()))
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.assertTrue(cm.pid_alive(child.pid))
+        self.assertTrue(cm.pid_alive(child.pid), "asking must not end it, as os.kill(pid, 0) would")
+        child.kill()
+        child.wait()
+        self.assertFalse(cm.pid_alive(child.pid))
+        self.assertIsInstance(cm.app_running(), bool)
 
 
 class Help(unittest.TestCase):

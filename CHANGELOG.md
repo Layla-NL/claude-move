@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+- Windows. The desktop app's data is found under `%APPDATA%\Claude` or, for the Microsoft Store build, `%LOCALAPPDATA%\Packages\…\LocalCache\Roaming\Claude` (the one with the newest session list), its log next to it. The desktop app is told from the `claude` CLI by its install path; the move button asks it to close, ends it if it only went to the notification area, and starts it again (its launcher, else the Start menu entry). Terminal buttons write a `.cmd` script and open a console window that stays open; copied commands are PowerShell. Notifications are toasts. `app install` makes a Start menu shortcut (and a desktop one) that runs the panel under `pythonw`, with the icon shrunk to 256 px and stored as `.ico`. `run` ends claude's whole process tree at a limit (npm installs start it through a `.cmd`). The status line recorder is written so both Git Bash and cmd can run it, and an existing status line is chained through Git Bash. Chinese is picked from the Windows display language. Checking whether the panel is already running no longer uses `os.kill(pid, 0)`, which on Windows would end that process.
+- Files claude-move writes and reads are UTF-8 on every system.
+- Tests run on Windows and macOS in GitHub Actions; the fake `claude` in the tests is Python.
+
 ## 0.4.0
 - `usage --refresh`: official percentages for every account, from the CLI's own `/usage` command run once per signed-in config folder (`~/.claude`, `~/.claude-*`, `--config`). Shows every meter the plan reports (5-hour session, week, per-model week); a meter at 100% counts as cooling until it resets; the official weekly reset time is used when known. No quota is used and claude-move never reads the login.
 - The panel's meters turn red at 80%.
