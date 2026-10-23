@@ -18,12 +18,15 @@ Usage:
   claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]
   claude-move undo [--list] [--backup NAME] [--dry-run]
   claude-move import-cli [--config DIR] [--project PATH] [--session ID ...] [--days N] [--dry-run]
-  claude-move usage [--html] [--config DIR ...]
+  claude-move usage [--refresh] [--html] [--config DIR ...]
+  claude-move panel [--port N] [--idle SECONDS]
+  claude-move app install|uninstall [--dir DIR] [--no-dock] [--icon IMAGE]
   claude-move watch install|uninstall
 <account> is a label you gave with `name`, or the first characters of the account id.
 """
 import argparse
 import json
+import re
 import locale
 import os
 import shutil
@@ -33,7 +36,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
 ROOT = Path(os.environ.get("CLAUDE_MOVE_ROOT", str(HOME / "Library/Application Support/Claude/claude-code-sessions")))
@@ -100,8 +103,8 @@ T = {
     "same_cfg": ("Source and target config folders are the same.", "来源和目标是同一个配置目录。"),
     "done": ("Moved {n}. Reopen the desktop app. Transcripts in ~/.claude/projects were never touched.",
              "搬好了 {n} 个。现在重新打开桌面 App。会话的完整记录本来就在 ~/.claude/projects，不用动。"),
-    "u_title": ("Quota by account: cooling and reset times from the official limit messages, use counted from this Mac's transcripts, official % only from the CLI status line",
-                "各账号额度：冷却和恢复时间来自官方的限额提示，用量按本机会话记录统计，官方百分比只来自命令行版状态栏"),
+    "u_title": ("Quota by account: cooling and reset times from the official limit messages, use counted from this Mac's transcripts, official % from the CLI (usage --refresh, or the status line recorder)",
+                "各账号额度：冷却和恢复时间来自官方的限额提示，用量按本机会话记录统计，官方百分比来自命令行版（usage --refresh 或状态栏记录器）"),
     "u_cool": ("cooling   {k} limit used up, back at {w}", "冷却中    {k}额度用完，{w} 恢复"),
     "u_ok": ("available", "可用    "),
     "u_week": ("week", "本周"),
@@ -109,16 +112,55 @@ T = {
     "u_7d": ("7 days", "近 7 天"),
     "u_kind_week": ("weekly", "每周"),
     "u_kind_5h": ("5-hour", "5 小时"),
-    "u_official": ("official: week {w}% · 5h {f}% ({a} ago, CLI)", "官方：本周 {w}% · 5 小时 {f}%（{a}前，命令行）"),
+    "u_official": ("official: {rows} ({a} ago)", "官方：{rows}（{a}前）"),
+    "u_pct": ("{k} {p}%", "{k} {p}%"),
+    "r_scan": ("Asking the official /usage of each CLI login:", "向每个命令行登录问官方 /usage："),
+    "r_ok": ("  {d}: {a}  {rows}", "  {d}：{a}  {rows}"),
+    "r_fail": ("  {d}: {e}", "  {d}：{e}"),
+    "r_nologin": ("no plan usage: not signed in with a Claude subscription (run: CLAUDE_CONFIG_DIR={d} claude, then /login)",
+                  "没有套餐额度：这个目录没登录订阅账号（先运行 CLAUDE_CONFIG_DIR={d} claude，再输入 /login）"),
+    "r_noclaude": ("Claude Code CLI (`claude`) not found on PATH.", "没找到命令行版 Claude Code（claude 命令）。"),
+    "r_none": ("No CLI logins found. Sign each account in once: CLAUDE_CONFIG_DIR=~/.claude-<name> claude, then /login.",
+               "没找到命令行登录。每个号登录一次：CLAUDE_CONFIG_DIR=~/.claude-<名字> claude，再输入 /login。"),
     "u_spent": ("{k} ${d:.0f} at API prices", "{k}折合 API 价 ${d:.0f}"),
     "u_reset": ("week resets {w}", "本周 {w} 重置"),
     "u_tag_pick": ("switch here", "建议换到这个"),
+    "a_done": ("Installed {p}. Double-click it to open the panel.", "已安装 {p}，双击就能打开面板。"),
+    "a_dock": ("Added to the Dock.", "已放进程序坞。"),
+    "a_in_dock": ("Already in the Dock.", "程序坞里已经有了。"),
+    "a_removed": ("Removed {p}. If it is still in the Dock, drag it out.", "已删除 {p}。程序坞里如果还有它的图标，拖出来就行。"),
+    "a_mac": ("Claude Move.app is macOS only.", "Claude Move.app 只支持 macOS。"),
+    "p_url": ("Panel running at {u}  (only this Mac can open it; Ctrl-C to stop)", "面板已启动：{u}（只有本机能打开；按 Ctrl-C 关掉）"),
+    "p_detached_app": ("Started inside the desktop app, so the panel was opened through Claude Move.app instead: quitting the app from the panel would otherwise stop it.",
+                       "这是在桌面 App 里启动的，所以改由 Claude Move.app 打开面板：不然从面板退出 App 时，面板会被一起关掉。"),
+    "p_detached": ("Started inside the desktop app, so the panel now runs on its own in the background and opens in your browser.",
+                   "这是在桌面 App 里启动的，面板已改到后台独立运行，会在浏览器里打开。"),
+    "p_signed": ("The desktop app is signed into: {a}", "桌面 App 现在登录的是：{a}"),
+    "p_unknown": ("Can't tell which account the desktop app is signed into yet.", "暂时看不出桌面 App 登录的是哪个号。"),
+    "p_step1": ("In the desktop app: log out, sign in with the account you want, and open the Code tab once.",
+                "在桌面 App 里：退出登录，登上要换的号，打开一次 Code 页。"),
+    "p_step2": ("Come back and press the button: it quits the app, copies your sessions over (backing up first) and reopens the app.",
+                "回到这里点按钮：自动退出 App、把会话搬过来（先备份）、重新打开 App。"),
+    "p_go": ("Move sessions from {s} to {a} and reopen the app", "把 {s} 的会话搬到 {a}，并重开 App"),
+    "p_go_same": ("Nothing to move yet", "现在没有要搬的"),
+    "p_all": ("all sessions (default: used in the last 3 days)", "搬全部会话（默认只搬最近 3 天用过的）"),
+    "p_refresh": ("Refresh official %", "刷新官方百分比"),
+    "p_copy": ("Copy CLI command", "复制命令行启动命令"),
+    "p_copied": ("Copied", "已复制"),
+    "p_working": ("Working…", "处理中……"),
+    "p_confirm": ("Quit the desktop app now and move the sessions to {a}?", "现在退出桌面 App，把会话搬到 {a}？"),
+    "p_busy": ("Already running.", "正在处理，请稍等。"),
+    "p_not_signed": ("The desktop app is not signed into that account. Sign in there first, open the Code tab once, then press again.",
+                     "桌面 App 登录的不是这个号。先在 App 里登录它、打开一次 Code 页，再点一次。"),
+    "p_no_folder": ("That account has no session folder yet: open the Code tab once in the desktop app.", "这个号还没有会话目录：先在桌面 App 里打开一次 Code 页。"),
+    "p_quitting": ("Quitting the desktop app…", "正在退出桌面 App……"),
+    "p_opening": ("Reopening the desktop app…", "正在重新打开桌面 App……"),
     "u_head": ("Quota by account", "各账号额度"),
     "u_back": ("{k} limit used up · back at {w}", "{k}额度用完 · {w} 恢复"),
-    "u_off_head": ("Official, from the CLI {a} ago", "官方数据，{a}前在命令行记下"),
+    "u_off_head": ("Official, fetched {a} ago", "官方数据，{a}前取得"),
     "u_cli_head": ("CLI", "命令行"),
     "u_tag_cool": ("cooling", "冷却中"),
-    "u_pick": ("-> switch to: {a} (not cooling, least used this week)", "→ 建议换到：{a}（没在冷却，这周用得最少）"),
+    "u_pick": ("-> switch to: {a} (not cooling, most left this week by plan size)", "→ 建议换到：{a}（没在冷却，按套餐大小算本周剩得最多）"),
     "u_pick_none": ("-> every account is cooling; the first one back is {a} at {w}", "→ 所有账号都在冷却，最早恢复的是 {a}，{w}"),
     "u_unmapped": ("CLI, account unknown (pass --config DIR to attribute)", "命令行，分不清是哪个号（用 --config 指定配置目录可以归到账号）"),
     "u_notes": ("Use is priced at API list prices only to compare accounts; it counts Claude Code on this Mac, not claude.ai chat or other devices.",
@@ -447,6 +489,7 @@ CONF = NAMES.parent
 CACHE = Path(os.environ.get("CLAUDE_MOVE_CACHE", str(HOME / ".cache/claude-move/usage-v2.json")))
 LOGS = Path(os.environ.get("CLAUDE_MOVE_LOGS", str(HOME / "Library/Logs/Claude")))
 LIMITS = CONF / "limits.json"
+PANEL = CONF / "panel.json"
 WATCH = CONF / "watch.json"
 KEEP_DAYS = 35
 WEEK, FIVE_H = 7 * 86400, 5 * 3600
@@ -626,6 +669,191 @@ def clock(ts):
     return time.strftime("%m-%d %H:%M", time.localtime(ts))
 
 
+ROW_ORDER = {"weekly_all": 0, "weekly_scoped": 1, "session": 2}
+
+
+def official_rows(off):
+    """Rows of an official record. Older status line records kept five_hour/seven_day keys."""
+    if not isinstance(off, dict):
+        return []
+    rows = off.get("rows")
+    if rows is None:
+        rows = []
+        for key, kind in (("seven_day", "weekly_all"), ("five_hour", "session")):
+            v = off.get(key)
+            if isinstance(v, dict) and v.get("used_percentage") is not None:
+                rows.append({"kind": kind, "percent": v["used_percentage"], "resets_at": v.get("resets_at")})
+    return sorted((r for r in rows if isinstance(r, dict)), key=lambda r: ROW_ORDER.get(r.get("kind"), 9))
+
+
+def row_label(r):
+    if r.get("kind") == "session":
+        return t("u_5h")
+    base = t("u_week")
+    return f"{base} · {r['scope']}" if r.get("kind") == "weekly_scoped" and r.get("scope") else base
+
+
+def rows_text(rows):
+    return " · ".join(t("u_pct", k=row_label(r), p=round(r.get("percent") or 0)) for r in rows)
+
+
+def plan_name(oa):
+    """Plan from the account profile the CLI caches in .claude.json, e.g. organizationType claude_max with
+    organizationRateLimitTier default_claude_max_20x -> "Max 20x"."""
+    import re
+    if not isinstance(oa, dict):
+        return ""
+    tier = (oa.get("organizationRateLimitTier") or oa.get("userRateLimitTier") or "").lower()
+    kind = (oa.get("organizationType") or "").lower()
+    m = re.search(r"max_(\d+)x", tier)
+    if "max" in kind or m:
+        return f"Max {m.group(1)}x" if m else "Max"
+    for key, label in (("pro", "Pro"), ("team", "Team"), ("enterprise", "Enterprise")):
+        if key in kind or key in tier:
+            return label
+    return ""
+
+
+def plans(extra=()):
+    out = {}
+    for c in cli_configs(extra):
+        d = load(HOME / ".claude.json" if c == HOME / ".claude" else c / ".claude.json")
+        oa = d.get("oauthAccount") if isinstance(d, dict) else None
+        name = plan_name(oa)
+        if name and isinstance(oa, dict) and oa.get("accountUuid"):
+            out[oa["accountUuid"]] = name
+    return out
+
+
+def cli_command(cfg):
+    if cfg == HOME / ".claude":
+        return "claude"
+    shown = "~/" + str(cfg.relative_to(HOME)) if str(cfg).startswith(str(HOME) + os.sep) else str(cfg)
+    return f"CLAUDE_CONFIG_DIR={shown} claude"
+
+
+def cli_configs(extra=()):
+    """CLI config folders that have been signed in: ~/.claude, ~/.claude-*, and any passed with --config."""
+    found = [HOME / ".claude"] + sorted(p for p in HOME.glob(".claude-*") if p.is_dir())
+    found += [Path(os.path.expanduser(c)) for c in extra]
+    out = []
+    for c in found:
+        if c not in out and cli_account(c):
+            out.append(c)
+    return out
+
+
+def parse_reset(text, tz):
+    """'Oct 27 at 10am', '3pm', '3:30pm' in the given IANA zone -> epoch seconds (next occurrence)."""
+    try:
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(tz) if tz else None
+    except Exception:
+        zone = None
+    m = re.match(r"(?:([A-Z][a-z]{2}) (\d{1,2})(?: at )?)?\s*(\d{1,2})(?::(\d\d))?\s*([ap]m)$", text.strip(), re.I)
+    if not m:
+        return None
+    mon, day, hour, minute, ap = m.groups()
+    hour = int(hour) % 12 + (12 if ap.lower() == "pm" else 0)
+    now = datetime.now(zone) if zone else datetime.now()
+    try:
+        if mon:
+            month = datetime.strptime(mon, "%b").month
+            when = now.replace(month=month, day=int(day), hour=hour, minute=int(minute or 0), second=0, microsecond=0)
+            if when.timestamp() < now.timestamp() - 86400 * 180:
+                when = when.replace(year=when.year + 1)
+        else:
+            when = now.replace(hour=hour, minute=int(minute or 0), second=0, microsecond=0)
+            if when.timestamp() < now.timestamp():
+                when = datetime.fromtimestamp(when.timestamp() + 86400, when.tzinfo)
+    except ValueError:
+        return None
+    return when.timestamp()
+
+
+def parse_usage_text(text):
+    """Fallback when the structured report has no rows: the /usage text says the same thing, e.g.
+    'Current week (all models): 96% used · resets Oct 27 at 10am (Asia/Singapore)'."""
+    rows = []
+    for line in text.splitlines():
+        m = re.match(r"\s*Current (session|week)(?: \((.+?)\))?:\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+?)(?: \(([^)]+)\))?)?\s*$", line)
+        if not m:
+            continue
+        kind, scope, pct, when, tz = m.groups()
+        if kind == "session":
+            k = "session"
+        else:
+            k = "weekly_all" if (scope or "").lower() in ("", "all models") else "weekly_scoped"
+        rows.append({"kind": k, "percent": float(pct), "resets_at": parse_reset(when, tz) if when else None,
+                     "scope": scope if k == "weekly_scoped" else None})
+    return rows
+
+
+def parse_usage_report(stdout):
+    """Rows of the `usage_report` that `claude -p /usage --output-format stream-json` attaches to its reply."""
+    for line in stdout.splitlines():
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        rep_ = m.get("usage_report") if isinstance(m, dict) else None
+        if rep_ is None and isinstance(m, dict) and isinstance(m.get("message"), dict):
+            rep_ = m["message"].get("usage_report")
+        if not isinstance(rep_, dict):
+            continue
+        limits = ((rep_.get("rate_limits") or {}).get("limits")) or []
+        if not limits:
+            text = " ".join(c.get("text", "") for c in ((m.get("message") or {}).get("content") or []) if isinstance(c, dict))
+            return parse_usage_text(text) or None
+        rows = []
+        for r in limits:
+            if not isinstance(r, dict) or r.get("percent") is None:
+                continue
+            scope = ((r.get("scope") or {}).get("model") or {}).get("display_name") if isinstance(r.get("scope"), dict) else None
+            rows.append({"kind": r.get("kind") or "", "percent": r["percent"],
+                         "resets_at": iso_ts(r["resets_at"]) if r.get("resets_at") else None, "scope": scope})
+        return rows
+    return None
+
+
+def refresh_official(extra=()):
+    """Run the official `/usage` command once per signed-in CLI config folder. It is a local command: no model call,
+    no quota used. claude-move only runs the CLI; the CLI uses its own login."""
+    exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude")
+    if not exe:
+        print(t("r_noclaude"))
+        return
+    cfgs = cli_configs(extra)
+    if not cfgs:
+        print(t("r_none"))
+        return
+    print(t("r_scan"))
+    cur = load(LIMITS) or {}
+    for c in cfgs:
+        env = dict(os.environ)
+        if c == HOME / ".claude":
+            env.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            env["CLAUDE_CONFIG_DIR"] = str(c)
+        shown = "~/" + str(c.relative_to(HOME)) if str(c).startswith(str(HOME)) else str(c)
+        try:
+            r = subprocess.run([exe, "-p", "/usage", "--output-format", "stream-json", "--verbose", "--no-session-persistence"],
+                               capture_output=True, text=True, env=env, timeout=90, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError) as e:
+            print(t("r_fail", d=shown, e=e))
+            continue
+        rows = parse_usage_report(r.stdout)
+        if not rows:  # signed out, or signed in with an API key: /usage then reports cost only
+            print(t("r_fail", d=shown, e=t("r_nologin", d=shown)))
+            continue
+        acct = cli_account(c)
+        rows = official_rows({"rows": rows})
+        cur[acct] = {"at": time.time(), "src": "usage", "rows": rows}
+        print(t("r_ok", d=shown, a=names().get(acct, acct[:8]), rows=rows_text(rows)))
+    CONF.mkdir(parents=True, exist_ok=True)
+    LIMITS.write_text(json.dumps(cur, indent=2) + "\n")
+
+
 def usage_report(extra_cfgs=(), now=None):
     now = now or time.time()
     accts = accounts()
@@ -651,6 +879,10 @@ def usage_report(extra_cfgs=(), now=None):
     for h in hits:
         by.setdefault(who(h[0], h[1], h[4], h[5]), {"recs": [], "hits": []})["hits"].append(h)
     official = load(LIMITS) or {}
+    plan_of = plans(extra_cfgs)
+    cli_of = {}
+    for c in cli_configs(extra_cfgs):
+        cli_of.setdefault(cli_account(c), c)
     ids = {a["acct"] for a in accts if a["sessions"]} | {k for k in by if k} | set(official)
     rows = []
     for acct in ids:
@@ -659,22 +891,37 @@ def usage_report(extra_cfgs=(), now=None):
         w0, w1 = week_window(h7, now)
         spent_week = sum(r[3] for r in b["recs"] if r[0] >= (w0 if w0 else now - WEEK))
         spent_5h = sum(r[3] for r in b["recs"] if r[0] >= now - FIVE_H)
+        off = official.get(acct)
+        off = off if isinstance(off, dict) and now - off.get("at", 0) < 3 * 86400 else None
+        rows_off = official_rows(off)
         cool = [h for h in b["hits"] if h[3] > now]
         cool = max(cool, key=lambda h: h[3]) if cool else None
-        off = official.get(acct)
+        full = [r for r in rows_off if (r.get("percent") or 0) >= 100 and (r.get("resets_at") or 0) > now]
+        if full and not cool:
+            r0 = max(full, key=lambda r: r["resets_at"])
+            cool = [0, "", "five_hour" if r0["kind"] == "session" else "seven_day", r0["resets_at"]]
+        wk = next((r for r in rows_off if r.get("kind") == "weekly_all" and r.get("resets_at")), None)
+        if wk:
+            w1 = wk["resets_at"]
         daily = [round(sum(r[3] for r in b["recs"] if now - (i + 1) * 86400 <= r[0] < now - i * 86400), 2)
                  for i in range(6, -1, -1)]
         rows.append({
-            "acct": acct, "name": names().get(acct, "") or acct[:8],
+            "acct": acct, "name": names().get(acct, "") or acct[:8], "plan": plan_of.get(acct, ""),
+            "cli": cli_command(cli_of[acct]) if acct in cli_of else "",
             "cool": {"kind": cool[2], "until": cool[3]} if cool else None,
             "week_usd": spent_week, "five_usd": spent_5h, "week_reset": w1, "daily": daily,
-            "official": off if isinstance(off, dict) and now - off.get("at", 0) < 3 * 86400 else None,
+            "official": {"at": off["at"], "rows": rows_off} if off and rows_off else None,
             "last": max((r[0] for r in b["recs"]), default=0)})
     unmapped = by.get(None)
     rows.sort(key=lambda r: r["last"], reverse=True)
     free = [r for r in rows if not r["cool"]]
-    pct = lambda r: ((r["official"] or {}).get("seven_day") or {}).get("used_percentage")
-    pick = min(free, key=lambda r: (pct(r) is None, pct(r) or 0, r["week_usd"])) if free else None
+    pct = lambda r: next((x["percent"] for x in (r["official"] or {}).get("rows", []) if x.get("kind") == "weekly_all"), None)
+    def mult(r):  # Pro = 1; Max 5x / 20x scale the same plan
+        m = re.search(r"(\d+)x", r["plan"])
+        return int(m.group(1)) if m else 1
+
+    # most quota left this week: (100 - weekly %) x plan size; accounts without official % fall back to least used
+    pick = min(free, key=lambda r: (pct(r) is None, -(100 - (pct(r) or 0)) * mult(r), r["week_usd"])) if free else None
     first_back = min(rows, key=lambda r: r["cool"]["until"]) if rows and not free else None
     return {"now": now, "rows": rows, "pick": pick, "first_back": first_back,
             "unmapped_usd": sum(r[3] for r in unmapped["recs"] if r[0] >= now - WEEK) if unmapped else 0}
@@ -684,8 +931,7 @@ def row_text(r, now):
     parts = []
     off = r["official"]
     if off:
-        parts.append(t("u_official", w=round((off.get("seven_day") or {}).get("used_percentage", 0)),
-                       f=round((off.get("five_hour") or {}).get("used_percentage", 0)), a=ago(now - off["at"])))
+        parts.append(t("u_official", rows=rows_text(off["rows"]), a=ago(now - off["at"])))
     parts.append(t("u_spent", k=t("u_week") if r["week_reset"] else t("u_7d"), d=r["week_usd"]))
     parts.append(t("u_spent", k=t("u_5h"), d=r["five_usd"]))
     if r["week_reset"]:
@@ -697,13 +943,16 @@ def row_text(r, now):
 
 
 def cmd_usage(args):
+    if args.refresh:
+        refresh_official(args.config or ())
+        print()
     print(t("u_scan"), file=sys.stderr)
     rep = usage_report(args.config or ())
     print(t("u_title"))
     for r in rep["rows"]:
-        print(f"{r['name']:10} {row_text(r, rep['now'])}")
+        print(f"{r['name']:10} {r['plan'] or '-':8} {row_text(r, rep['now'])}")
     if rep["unmapped_usd"] >= 1:
-        print(f"{'-':10} {t('u_unmapped')}: " + t("u_spent", k=t("u_week"), d=rep["unmapped_usd"]))
+        print(f"{'-':10} {t('u_unmapped')}: " + t("u_spent", k=t("u_7d"), d=rep["unmapped_usd"]))
     if rep["pick"]:
         print(t("u_pick", a=rep["pick"]["name"]))
     elif rep["first_back"]:
@@ -718,7 +967,7 @@ def cmd_usage(args):
             subprocess.run(["open", str(out)], check=False)
 
 
-def render_html(rep):
+def render_html(rep, live=None):
     from html import escape
     now = rep["now"]
     peak = max([max(r["daily"]) for r in rep["rows"]] + [1])
@@ -737,17 +986,20 @@ def render_html(rep):
         meters = ""
         off = r["official"]
         if off:
-            for key, label in (("seven_day", t("u_week")), ("five_hour", t("u_5h"))):
-                if isinstance(off.get(key), dict):
-                    pc = off[key].get("used_percentage", 0)
-                    meters += (f'<div class="m"><span>{escape(label)}</span><div class="bar"><i style="width:{min(100, pc)}%">'
-                               f'</i></div><b>{pc:.0f}%</b></div>')
+            for row in off["rows"]:
+                pc = row.get("percent") or 0
+                when_ = f' title="{escape(clock(row["resets_at"]))}"' if row.get("resets_at") else ""
+                meters += (f'<div class="m"{when_}><span>{escape(row_label(row))}</span><div class="bar">'
+                           f'<i class="{"hot" if pc >= 80 else ""}" style="width:{min(100, pc)}%"></i></div><b>{pc:.0f}%</b></div>')
             meters = (f'<div class="official"><p>{escape(t("u_off_head", a=ago(now - off["at"])))}</p>{meters}</div>')
         bars = "".join(
             f'<div class="day" title="{days[i]} ${v:,.0f}"><i style="height:{max(2, 100 * v / peak):.0f}%"></i>'
             f'<span>{days[i][3:]}</span></div>' for i, v in enumerate(r["daily"]))
         foot = f'<p class="foot">{escape(t("u_reset", w=clock(r["week_reset"])))}</p>' if r["week_reset"] else ""
-        cards.append(f'<section class="card {state}"><header><h2>{escape(r["name"])}</h2>'
+        plan = f' <small class="plan">{escape(r["plan"])}</small>' if r["plan"] else ""
+        if live and r["cli"]:
+            foot += (f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>')
+        cards.append(f'<section class="card {state}"><header><h2>{escape(r["name"])}{plan}</h2>'
                      f'<span class="badge">{escape(badge)}</span></header>{cool}{nums}{meters}'
                      f'<div class="days">{bars}</div>{foot}</section>')
     if rep["unmapped_usd"] >= 1:
@@ -769,20 +1021,426 @@ main{{max-width:1040px;margin:0 auto;padding:28px 16px 40px}} h1{{font-size:22px
 .advice{{font-weight:600;margin:0 0 16px;color:var(--ok)}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}}
 .card{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}} .card.pick{{border:2px solid var(--ok)}} .card.cool{{border-color:var(--cool)}} .card.muted{{opacity:.8}}
-header{{display:flex;justify-content:space-between;align-items:center;gap:8px}} h2{{margin:0;font-size:18px}}
+header{{display:flex;justify-content:space-between;align-items:center;gap:8px}} h2{{margin:0;font-size:18px}} .plan{{font-size:12px;font-weight:600;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:2px}}
 .badge{{font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}}
 .cool .badge{{background:color-mix(in srgb,var(--cool) 14%,transparent);color:var(--cool)}} .coolline{{color:var(--cool);font-weight:600;margin:10px 0 0}}
 .nums{{display:flex;gap:28px;margin:14px 0 6px}} .nums b{{display:block;font-size:26px;font-variant-numeric:tabular-nums;letter-spacing:-.5px}} .nums span{{color:var(--dim);font-size:12px}}
 .official{{margin:10px 0 4px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--off) 8%,transparent)}} .official p{{margin:0 0 4px;font-size:12px;color:var(--dim)}}
-.m{{display:grid;grid-template-columns:52px 1fr 44px;gap:8px;align-items:center;font-size:13px;margin:4px 0}} .bar{{height:8px;background:var(--line);border-radius:4px;overflow:hidden}}
-.bar i{{display:block;height:100%;background:var(--off)}} .m b{{text-align:right;font-variant-numeric:tabular-nums}}
+.m{{display:grid;grid-template-columns:84px 1fr 44px;gap:8px;align-items:center;font-size:13px;margin:4px 0}} .bar{{height:8px;background:var(--line);border-radius:4px;overflow:hidden}}
+.bar i{{display:block;height:100%;background:var(--off)}} .bar i.hot{{background:var(--cool)}} .m b{{text-align:right;font-variant-numeric:tabular-nums}}
 .days{{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;height:76px;margin-top:12px;align-items:end}}
 .day{{height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}} .day i{{width:100%;max-width:26px;background:var(--bar);border-radius:4px 4px 2px 2px}}
 .day span{{font-size:10px;color:var(--dim)}} .foot{{color:var(--dim);font-size:12px;margin:10px 0 0}}
 .notes{{color:var(--dim);font-size:12px;margin-top:22px}}
+.live{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:0 0 16px}}
+.live h3{{margin:0 0 6px;font-size:16px}} .live ol{{margin:6px 0 10px;padding-left:20px;color:var(--dim);font-size:13px}}
+.live .row{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}} .live label{{font-size:13px;color:var(--dim)}}
+button{{font:inherit;font-size:14px;font-weight:600;border-radius:10px;padding:8px 14px;border:0;cursor:pointer;background:var(--ok);color:#fff}}
+button:disabled{{opacity:.45;cursor:default}} button.ghost{{background:transparent;color:var(--dim);border:1px solid var(--line);font-size:12px;padding:4px 10px;margin-top:10px}}
+pre.log{{white-space:pre-wrap;font-size:12px;background:var(--bg);border-radius:10px;padding:10px;margin:10px 0 0;max-height:240px;overflow:auto}}
 </style></head><body><main><h1>{escape(t("u_head"))}</h1><p class="sub">{escape(clock(now))} · claude-move {__version__}</p>
-<p class="advice">{escape(pick)}</p><div class="grid">{"".join(cards)}</div>
-<p class="notes">{escape(t("u_title"))}<br>{escape(t("u_notes"))}</p></main></body></html>"""
+<p class="advice">{escape(pick)}</p>{live_bar(live)}<div class="grid">{"".join(cards)}</div>
+<p class="notes">{escape(t("u_title"))}<br>{escape(t("u_notes"))}</p></main>{live_script(live)}</body></html>"""
+
+
+def live_bar(live):
+    if not live:
+        return ""
+    from html import escape
+    return f'''<section class="live" id="live"><h3 id="signed">…</h3><ol><li>{escape(t("p_step1"))}</li><li>{escape(t("p_step2"))}</li></ol>
+<div class="row"><button id="go" disabled>…</button><label><input type="checkbox" id="all"> {escape(t("p_all"))}</label>
+<button class="ghost" id="refresh">{escape(t("p_refresh"))}</button></div><pre class="log" id="log" hidden></pre></section>'''
+
+
+def live_script(live):
+    if not live:
+        return ""
+    texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm")}
+    return f"""<script>
+const T = {json.dumps(texts, ensure_ascii=False)}, KEY = {json.dumps(live["token"])};
+const fmt = (s, o) => s.replace(/\\{{(\\w+)\\}}/g, (_, k) => o[k] ?? "");
+const api = (path, body) => fetch(path, {{method: body ? "POST" : "GET", headers: {{"X-Token": KEY, "Content-Type": "application/json"}},
+  body: body ? JSON.stringify(body) : undefined}}).then(r => r.json());
+let state = null;
+async function poll() {{
+  try {{ state = await api("/state"); }} catch (e) {{ return; }}
+  const go = document.getElementById("go");
+  document.getElementById("signed").textContent = state.signed ? fmt(T.p_signed, {{a: state.signed.name}}) : T.p_unknown;
+  if (state.signed && state.source) {{
+    go.textContent = fmt(T.p_go, {{s: state.source.name, a: state.signed.name}}); go.disabled = !!state.busy;
+  }} else {{ go.textContent = T.p_go_same; go.disabled = true; }}
+}}
+document.getElementById("go").onclick = async () => {{
+  if (!state || !state.signed || !confirm(fmt(T.p_confirm, {{a: state.signed.name}}))) return;
+  const log = document.getElementById("log"); log.hidden = false; log.textContent = T.p_working;
+  document.getElementById("go").disabled = true;
+  const r = await api("/switch", {{to: state.signed.acct, all: document.getElementById("all").checked}});
+  log.textContent = r.log; if (r.ok) setTimeout(() => location.reload(), 4000);
+}};
+document.getElementById("refresh").onclick = async () => {{
+  const log = document.getElementById("log"); log.hidden = false; log.textContent = T.p_working;
+  const r = await api("/refresh", {{}}); log.textContent = r.log; setTimeout(() => location.reload(), 1200);
+}};
+document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () =>
+  navigator.clipboard.writeText(b.dataset.copy).then(() => {{ b.textContent = T.p_copied; }}));
+poll(); setInterval(poll, 3000);
+</script>"""
+
+
+def quit_app():
+    cmd = os.environ.get("CLAUDE_MOVE_QUIT_CMD")
+    subprocess.run(cmd, shell=True) if cmd else subprocess.run(["osascript", "-e", 'tell application "Claude" to quit'], check=False)
+    for _ in range(60):
+        if not app_running():
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def open_app():
+    cmd = os.environ.get("CLAUDE_MOVE_OPEN_CMD")
+    subprocess.run(cmd, shell=True) if cmd else subprocess.run(["open", "-a", "Claude"], check=False)
+
+
+def switch_to(acct, include_all):
+    """The panel's button: the desktop app is already signed into `acct`. Quit it, copy the sessions in, reopen."""
+    import contextlib
+    import io
+    timeline = signin_timeline()
+    signed = timeline[-1][1] if timeline else None
+    buf = io.StringIO()
+    if signed != acct:
+        return False, t("p_not_signed")
+    target = next((a for a in accounts() if a["acct"] == acct), None)
+    if not target:
+        return False, t("p_no_folder")
+    with contextlib.redirect_stdout(buf):
+        print(t("p_quitting"))
+        if not quit_app():
+            return False, buf.getvalue() + t("running")
+        try:
+            cmd_to(argparse.Namespace(target=acct, source=None, days=3, all=include_all, only=None, dry_run=False))
+            ok = True
+        except SystemExit as e:
+            print(e.code if isinstance(e.code, str) else "")
+            ok = False
+        print(t("p_opening"))
+        open_app()
+    return ok, buf.getvalue()
+
+
+def inside_desktop_app():
+    """True when this process descends from the Claude desktop app (its terminal pane, a Code session)."""
+    if os.environ.get("CLAUDE_MOVE_SKIP_APP_CHECK") == "1":
+        return False
+    pid = os.getppid()
+    for _ in range(30):
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        except OSError:
+            return False
+        if not out:
+            return False
+        ppid, _, comm = out.partition(" ")
+        if "/Claude.app/" in comm:
+            return True
+        if not ppid.strip().isdigit() or int(ppid) <= 1:
+            return False
+        pid = int(ppid)
+    return False
+
+
+def cmd_panel(args):
+    import secrets
+    if not args.here and inside_desktop_app():
+        # quitting the app from the panel would take this process down with it; run on our own instead
+        app = Path(os.path.expanduser("~/Applications")) / APP_NAME
+        if app.exists():
+            subprocess.run(["open", str(app)], check=False)
+            print(t("p_detached_app"))
+            return
+        cmd = [sys.executable, str(Path(__file__).resolve()), "panel", "--here", "--idle", str(args.idle or 1800)]
+        for c in args.config or ():
+            cmd += ["--config", c]
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        print(t("p_detached"))
+        return
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+    import threading
+    import urllib.request
+    old = load(PANEL)
+    if isinstance(old, dict) and old.get("url") and pid_alive(old.get("pid")):
+        try:  # one panel at a time: a second launch just brings the running one back
+            base, tok = old["url"].split("/?t=")
+            req = urllib.request.Request(base + "/state", headers={"X-Token": tok})
+            urllib.request.urlopen(req, timeout=3).read()
+            print(t("p_url", u=old["url"]), flush=True)
+            if not args.no_open and sys.platform == "darwin":
+                subprocess.run(["open", old["url"]], check=False)
+            return
+        except (OSError, ValueError):
+            pass
+    token = secrets.token_urlsafe(18)
+    busy = {"on": False}
+    seen = {"t": time.time()}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def allowed(self):
+            host = self.headers.get("Host", "")
+            if host != f"127.0.0.1:{self.server.server_port}":  # no DNS rebinding
+                return False
+            q = parse_qs(urlparse(self.path).query)
+            ok = self.headers.get("X-Token") == token or q.get("t", [""])[0] == token
+            if ok:
+                seen["t"] = time.time()
+            return ok
+
+        def send(self, code, body, kind="application/json"):
+            data = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", kind + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if not self.allowed():
+                return self.send(403, "{}")
+            path = urlparse(self.path).path
+            if path == "/":
+                rep_ = usage_report(args.config or ())
+                return self.send(200, render_html(rep_, live={"token": token}), "text/html")
+            if path == "/state":
+                accts = accounts()
+                timeline = signin_timeline()
+                signed = timeline[-1][1] if timeline else None
+                others = [a for a in accts if a["acct"] != signed and a["sessions"]]
+                src = max(others, key=lambda a: a["last"]) if others else None
+                nm = names()
+                return self.send(200, json.dumps({
+                    "signed": {"acct": signed, "name": nm.get(signed, signed[:8])} if signed else None,
+                    "source": {"acct": src["acct"], "name": show(src)} if src else None, "busy": busy["on"]}))
+            self.send(404, "{}")
+
+        def do_POST(self):
+            if not self.allowed():
+                return self.send(403, "{}")
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except ValueError:
+                body = {}
+            path = urlparse(self.path).path
+            if path == "/switch":
+                if busy["on"]:
+                    return self.send(409, json.dumps({"ok": False, "log": t("p_busy")}))
+                busy["on"] = True
+                try:
+                    ok, log = switch_to(str(body.get("to") or ""), bool(body.get("all")))
+                finally:
+                    busy["on"] = False
+                return self.send(200, json.dumps({"ok": ok, "log": log}, ensure_ascii=False))
+            if path == "/refresh":
+                import contextlib
+                import io
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    refresh_official(args.config or ())
+                return self.send(200, json.dumps({"ok": True, "log": buf.getvalue()}, ensure_ascii=False))
+            self.send(404, "{}")
+
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    url = f"http://127.0.0.1:{srv.server_port}/?t={token}"
+    CONF.mkdir(parents=True, exist_ok=True)
+    PANEL.write_text(json.dumps({"pid": os.getpid(), "url": url}) + "\n")
+    os.chmod(PANEL, 0o600)
+    print(t("p_url", u=url), flush=True)
+    if not args.no_open and sys.platform == "darwin":
+        subprocess.run(["open", url], check=False)
+
+    def idle_watch():  # the open page polls every few seconds, so this only fires after the tab is gone
+        while True:
+            time.sleep(5)
+            if args.idle and not busy["on"] and time.time() - seen["t"] > args.idle:
+                srv.shutdown()
+                return
+
+    threading.Thread(target=idle_watch, daemon=True).start()
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print()
+    finally:
+        cur = load(PANEL)
+        if isinstance(cur, dict) and cur.get("pid") == os.getpid():
+            PANEL.unlink()
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+APP_NAME = "Claude Move.app"
+ICON_PNG = (
+    "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"
+)
+
+
+def dock_has(app):
+    out = subprocess.run(["defaults", "read", "com.apple.dock", "persistent-apps"], capture_output=True, text=True).stdout
+    return app.as_uri() in out
+
+
+def cmd_app(args):
+    """A double-clickable Claude Move.app that opens the panel. It runs on its own, so quitting the desktop app
+    from the panel does not stop it; the panel stops 30 minutes after its page is closed."""
+    import base64
+    import tempfile
+    app = Path(os.path.expanduser(args.dir)) / APP_NAME
+    if args.action == "uninstall":
+        if app.exists():
+            shutil.rmtree(app)
+        print(t("a_removed", p=app))
+        return
+    if sys.platform != "darwin":
+        sys.exit(t("a_mac"))
+    tool = Path(__file__).resolve()
+    claude = shutil.which("claude") or ""
+    path_dirs = list(dict.fromkeys(([str(Path(claude).parent)] if claude else [])
+                                   + [str(HOME / ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin"]))
+    python = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else sys.executable
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "launch.applescript"
+        src.write_text('on run\n  do shell script quoted form of (POSIX path of (path to me) & '
+                       '"Contents/Resources/launch.sh") & " > /dev/null 2>&1 &"\nend run\n')
+        if app.exists():
+            shutil.rmtree(app)
+        app.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["osacompile", "-o", str(app), str(src)], check=True)
+        launch = app / "Contents/Resources/launch.sh"
+        launch.write_text("#!/bin/sh\n"
+                          f"export PATH={json.dumps(':'.join(path_dirs))}:\"$PATH\"\n"
+                          f"export CLAUDE_MOVE_LANG={'zh' if ZH else 'en'}\n"
+                          + (f"export CLAUDE_MOVE_CLAUDE={json.dumps(claude)}\n" if claude else "")
+                          + f"exec {json.dumps(python)} {json.dumps(str(tool))} panel --here --idle 1800\n")
+        launch.chmod(0o755)
+        iconset = Path(tmp) / "icon.iconset"
+        iconset.mkdir()
+        png = Path(tmp) / "icon.png"
+        if args.icon:
+            subprocess.run(["sips", "-s", "format", "png", os.path.expanduser(args.icon), "--out", str(png)],
+                           capture_output=True, check=True)
+        else:
+            png.write_bytes(base64.b64decode("".join(ICON_PNG)))
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                px = min(512, size * scale)
+                name = f"icon_{size}x{size}{'@2x' if scale == 2 else ''}.png"
+                subprocess.run(["sips", "-z", str(px), str(px), str(png), "--out", str(iconset / name)],
+                               capture_output=True, check=True)
+        subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(app / "Contents/Resources/applet.icns")], check=True)
+    # osacompile adds an asset catalog whose stock icon wins over applet.icns; drop it and point the plist at ours
+    car = app / "Contents/Resources/Assets.car"
+    if car.exists():
+        car.unlink()
+    subprocess.run(["/usr/libexec/PlistBuddy", "-c", "Delete :CFBundleIconName", str(app / "Contents/Info.plist")],
+                   capture_output=True)
+    # the edits above break osacompile's ad-hoc seal; sign again so macOS does not call the app damaged
+    subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app)], capture_output=True, check=True)
+    subprocess.run(["touch", str(app)], check=False)
+    print(t("a_done", p=app))
+    if args.no_dock:
+        return
+    if dock_has(app):
+        print(t("a_in_dock"))
+        return
+    tile = ("<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key>"
+            f"<string>{app.as_uri()}/</string><key>_CFURLStringType</key><integer>15</integer></dict></dict></dict>")
+    subprocess.run(["defaults", "write", "com.apple.dock", "persistent-apps", "-array-add", tile], check=True)
+    subprocess.run(["killall", "Dock"], check=False)  # the Dock reloads its settings on restart
+    print(t("a_dock"))
 
 
 def settings_path():
@@ -841,7 +1499,10 @@ def watch_record(sp, state):
         acct = cli_account(Path(os.path.expanduser(cfg)) if cfg else HOME / ".claude")
         if isinstance(rl, dict) and acct:
             cur = load(LIMITS) or {}
-            cur[acct] = {"at": time.time(), **{k: v for k, v in rl.items() if k in ("five_hour", "seven_day")}}
+            rows = [{"kind": kind, "percent": rl[key]["used_percentage"], "resets_at": rl[key].get("resets_at")}
+                    for key, kind in (("seven_day", "weekly_all"), ("five_hour", "session"))
+                    if isinstance(rl.get(key), dict) and rl[key].get("used_percentage") is not None]
+            cur[acct] = {"at": time.time(), "src": "statusline", "rows": rows}
             CONF.mkdir(parents=True, exist_ok=True)
             tmp = LIMITS.with_suffix(".tmp")
             tmp.write_text(json.dumps(cur, indent=2) + "\n")
@@ -896,11 +1557,26 @@ def main(argv=None):
     ic.add_argument("--days", type=float, default=3, help="without --session: sessions touched in the last N days")
     ic.add_argument("--dry-run", action="store_true")
     ic.set_defaults(fn=cmd_import_cli)
-    us = sub.add_parser("usage", help="quota per account: cooling/reset times, estimated use, official % from the CLI")
+    us = sub.add_parser("usage", help="quota per account: cooling/reset times, estimated use, official %% from the CLI")
     us.add_argument("--html", action="store_true", help="also write a panel page and open it")
     us.add_argument("--no-open", action="store_true", help="with --html: write the page but do not open it")
     us.add_argument("--config", action="append", help="also read transcripts from this CLI config folder (repeatable)")
+    us.add_argument("--refresh", action="store_true",
+                    help="first ask the official /usage of every signed-in CLI config folder (~/.claude, ~/.claude-*)")
     us.set_defaults(fn=cmd_usage)
+    pn = sub.add_parser("panel", help="open the quota panel with a button that moves sessions after you switch accounts")
+    pn.add_argument("--port", type=int, default=0, help="port on 127.0.0.1 (default: any free port)")
+    pn.add_argument("--no-open", action="store_true")
+    pn.add_argument("--here", action="store_true", help="run in this process even inside the desktop app's terminal")
+    pn.add_argument("--idle", type=float, default=0, help="stop after this many seconds without the page open (default: never)")
+    pn.add_argument("--config", action="append", help="also read transcripts from this CLI config folder (repeatable)")
+    pn.set_defaults(fn=cmd_panel)
+    ap = sub.add_parser("app", help="install a double-clickable Claude Move.app that opens the panel (macOS)")
+    ap.add_argument("action", choices=["install", "uninstall"])
+    ap.add_argument("--dir", default="~/Applications", help="where to put Claude Move.app (default ~/Applications)")
+    ap.add_argument("--no-dock", action="store_true", help="do not add it to the Dock")
+    ap.add_argument("--icon", help="use this image (PNG/JPEG, ideally 1024x1024) as the app icon")
+    ap.set_defaults(fn=cmd_app)
     w = sub.add_parser("watch", help="record official CLI rate limits from the Claude Code status line")
     w.add_argument("action", choices=["install", "uninstall", "record"])
     w.set_defaults(fn=cmd_watch)

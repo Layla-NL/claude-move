@@ -54,7 +54,9 @@ Needs Python 3.9+ (the one macOS ships is fine). No dependencies.
 | `claude-move name <account> <label>` | Give an account a short label, e.g. `work`, `personal` |
 | `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them |
 | `claude-move undo [--list] [--backup NAME] [--dry-run]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too |
-| `claude-move usage [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % recorded from the CLI. `--html` opens a panel page |
+| `claude-move usage [--refresh] [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % from the CLI. `--refresh` asks `/usage` of each signed-in CLI folder first; `--html` opens a panel page |
+| `claude-move panel` | The same panel in your browser, served on 127.0.0.1 only, with a button that moves your sessions after you switch accounts (see below) |
+| `claude-move app install [--icon IMAGE] [--no-dock]` | Make `~/Applications/Claude Move.app` and put it in the Dock: double-click it to open the panel, no Terminal needed |
 | `claude-move watch install` / `uninstall` | Record the official 5-hour/weekly % each time the CLI status line refreshes; keeps your existing status line |
 | `claude-move import-cli --config DIR [--project PATH] [--session ID] [--days N] [--dry-run]` | Copy CLI session transcripts from another config folder (e.g. a second account under `CLAUDE_CONFIG_DIR=~/.claude-work`) into `~/.claude`, so the desktop app can open them. Never overwrites. A project folder name that starts with `-` needs `--project=-Users-me-app` |
 
@@ -73,13 +75,43 @@ Labels are stored in `~/.config/claude-move/accounts.json`.
   of your plan. Desktop replies are credited to whoever was signed into the desktop app at that moment
   (the app's own log names the account it is using); CLI replies go to the account of the config folder
   you pass with `--config`.
-- **Official percentages, from the CLI.** Claude Code hands its status line the official 5-hour and weekly
-  percentages for Pro and Max plans. `claude-move watch install` adds a small status line recorder that saves
-  them per account (your existing status line keeps showing). The desktop app's Code tab does not run
-  status line scripts, so these only update while you use the CLI.
+- **Official percentages, from the CLI.** `claude-move usage --refresh` runs the CLI's own `/usage` command once
+  for every config folder that is signed in (`~/.claude` and `~/.claude-*`) and shows the same meters as the
+  plan's usage page: this 5-hour session, the week, and any per-model weekly meter. `/usage` is a local
+  command, so it uses no quota, and claude-move never sees the login: it only runs the CLI.
+  Alternatively, `claude-move watch install` adds a status line recorder that saves the percentages each time
+  the CLI status line refreshes (your existing status line keeps showing). The desktop app's Code tab does
+  not run status line scripts.
+- **Plan.** Each account shows its plan (Pro, Max 5x, Max 20x) from the profile its CLI login caches. The
+  suggested account is the one with the most quota left this week, weighting the weekly % by plan size.
+
+To get official percentages for every account, sign each one into its own CLI config folder once:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-work claude    # then type /login and sign in with that account
+```
+
+Repeat with another folder name (`~/.claude-personal`, ...) per account, then run `claude-move usage --refresh --html`.
 
 `claude-move usage --html` also writes a panel page and opens it. It counts Claude Code on this Mac only;
 claude.ai chat and other devices are not included.
+
+### Switching from the panel
+
+`claude-move panel` opens the panel with a switch button. Signing in stays with you, in the app's own sign-in:
+
+1. In the desktop app, log out, sign in with the account you want, and open the Code tab once.
+2. In the panel, press "Move sessions from A to B and reopen the app". It checks that the app really is signed
+   into B (from the app's log), quits the app, runs the same copy as `claude-move to B` (backup first), and
+   reopens the app.
+
+Easiest: run `claude-move app install` once. It makes `~/Applications/Claude Move.app` (in the Dock too); double-click
+it and the panel opens. It runs on its own, so quitting the desktop app from the panel does not stop it, a second
+double-click brings back the running panel, and it stops by itself 30 minutes after its page is closed.
+`--icon` takes any image for the app icon. If you start `claude-move panel` by hand, do it from Terminal, not from
+inside a Claude Code session in the desktop app: quitting the app would stop that session too. The panel is served on 127.0.0.1 with a one-time token, so only this Mac can
+use it, and its buttons can only quit/reopen the app, move sessions, and refresh the official %. Each card can
+also copy the CLI command for that account (`CLAUDE_CONFIG_DIR=~/.claude-work claude`).
 
 ## What it does not do
 
@@ -124,13 +156,25 @@ Claude 桌面 App 换了账号登录以后，Code 页左边的会话列表空了
 - `undo [--list] [--backup 名字] [--dry-run]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。
 - `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
-- `usage [--html] [--config 目录]`：各账号额度面板，`--html` 打开网页版。
+- `usage [--refresh] [--html] [--config 目录]`：各账号额度面板；`--refresh` 先向每个命令行登录问官方 `/usage`，`--html` 打开网页版。
+- `panel`：在浏览器里打开带按钮的面板（只在本机 127.0.0.1 上）。换号时：先在桌面 App 里退出登录、登上新号、打开一次 Code 页，再回面板点“把 A 的会话搬到 B，并重开 App”。面板会先从 App 日志确认 App 现在登录的确实是 B，然后退出 App、照 `claude-move to B` 搬会话（先备份）、重新打开 App。登录这一步始终由你在 App 里自己点。请在“终端”里运行 `claude-move panel`，不要在桌面 App 的 Claude Code 会话里运行，因为退出 App 会连那个会话一起关掉。每张卡片还可以一键复制这个号的命令行启动命令。
+- `app install [--icon 图片] [--no-dock]`：生成 `~/Applications/Claude Move.app` 并放进程序坞，双击就打开面板，不用开终端。它独立运行，从面板退出桌面 App 不会把它关掉；再双击会回到已经开着的面板；页面关掉 30 分钟后自己停。`--icon` 可以换成任意图片当图标。
 - `watch install` / `watch uninstall`：装上（或卸掉）状态栏记录器，用命令行版时记下官方百分比。
 
 **额度面板：** `claude-move usage` 把几个号放在一起看，告诉你该换到哪个：
 - 冷却和恢复时间：撞到 5 小时或每周上限时，Claude Code 会把官方提示和恢复时间写进会话记录，面板读的就是它，所以能看到“每周额度用完，10-24 10:00 恢复”，以及每周几点重置。
 - 用量：把 `~/.claude/projects` 里的回复按最近 5 小时和本周加起来，按 API 价折算，只用来比较几个号谁用得多，不是账单，也不是套餐百分比。桌面 App 的回复算给当时登录的那个号（App 自己的日志里记着它在用哪个账号），命令行的回复算给 `--config` 指定的配置目录的账号。
-- 官方百分比：Pro 和 Max 用户的 Claude Code 会把官方的 5 小时、每周百分比交给状态栏。`claude-move watch install` 装一个小记录器，按账号存下来，你原来的状态栏照常显示。桌面 App 的 Code 页不运行状态栏脚本，所以只有用命令行版时才会更新。
+- 官方百分比：`claude-move usage --refresh` 对每个登录过的命令行配置目录（`~/.claude` 和 `~/.claude-*`）各跑一次官方的 `/usage`，拿到和套餐用量页一样的数据：这 5 小时、本周、按模型分的每周额度。`/usage` 是本地命令，不耗额度；claude-move 只是运行命令行，碰不到登录信息。另外 `claude-move watch install` 可以装一个状态栏记录器，命令行每刷新一次状态栏就记一次（你原来的状态栏照常显示）；桌面 App 的 Code 页不运行状态栏脚本。
+
+- 套餐：每个号旁边标出 Pro、Max 5x 或 Max 20x（来自命令行登录缓存的账号资料）。建议换哪个号时按套餐大小算本周剩多少，不只看百分比。
+
+每个号在自己的命令行配置目录里登录一次，就能看到所有号的官方百分比：
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个号登录
+```
+
+每个号换一个目录名（`~/.claude-personal` 等）照做一遍，然后运行 `claude-move usage --refresh --html`。
 只算这台 Mac 上的 Claude Code，网页聊天和别的设备上的用量算不进来。
 
 **不做的事：** 不搬 artifact、项目这类存在 claude.ai 上的东西（它们跟着创建它的账号走）；从不读、不用登录凭据（`usage` 只读会话记录、账号 id 和桌面 App 日志里写着当前账号的那几行；`watch install` 只在你运行时改 `settings.json`，`watch uninstall` 会把原来的状态栏放回去）；会话里点过的“这次允许”不会带过去。

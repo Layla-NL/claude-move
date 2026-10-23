@@ -241,7 +241,7 @@ class Usage(unittest.TestCase):
         r = self.run_tool("watch", "record", stdin=payload, CLAUDE_CONFIG_DIR=str(cfg))
         self.assertEqual(r.stdout.strip(), "old")  # the previous status line still shows
         saved = json.loads((self.home / ".config/claude-move/limits.json").read_text())
-        self.assertEqual(saved[self.b]["seven_day"]["used_percentage"], 41.2)
+        self.assertEqual([(r["kind"], r["percent"]) for r in saved[self.b]["rows"]], [("weekly_all", 41.2), ("session", 23.5)])
         r = self.run_tool("usage")
         self.assertIn("official: week 41% · 5h 24%", r.stdout)
         self.run_tool("watch", "uninstall", CLAUDE_CONFIG_DIR=str(cfg))
@@ -252,3 +252,158 @@ class Usage(unittest.TestCase):
     def test_watch_record_never_fails(self):
         r = self.run_tool("watch", "record", stdin="not json")
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_refresh_reads_official_usage_report(self):
+        # one signed-in CLI folder per account; a stub `claude` answers /usage the way the CLI's stream-json does
+        good, bad = self.home / ".claude-second", self.home / ".claude-old"
+        for c, acct in ((good, self.b), (bad, self.a)):
+            c.mkdir()
+            (c / ".claude.json").write_text(json.dumps({"oauthAccount": {
+                "accountUuid": acct, "organizationType": "claude_max", "organizationRateLimitTier": "default_claude_max_20x"}}))
+        soon = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.now + 7200))
+        report = {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "usage"}]},
+                  "usage_report": {"session": {}, "rate_limits": {"limits": [
+                      {"kind": "session", "group": "session", "percent": 100, "resets_at": soon, "severity": "error", "is_active": True},
+                      {"kind": "weekly_all", "group": "weekly", "percent": 41, "resets_at": soon, "severity": "ok", "is_active": True},
+                      {"kind": "weekly_scoped", "group": "weekly", "percent": 12, "resets_at": soon,
+                       "scope": {"model": {"display_name": "Opus"}}, "severity": "ok", "is_active": True}]}}}
+        stub = self.home / "claude"
+        stub.write_text("#!/bin/sh\n"
+                        f"if [ \"$CLAUDE_CONFIG_DIR\" = \"{good}\" ]; then echo '{json.dumps(report)}'; "
+                        "else echo 'Not logged in · Please run /login'; fi\n")
+        stub.chmod(0o755)
+        self.run_tool("name", "bbbb", "second")
+        r = self.run_tool("usage", "--refresh", CLAUDE_MOVE_CLAUDE=str(stub))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("~/.claude-second: second  week 41% · week · Opus 12% · 5h 100%", r.stdout)
+        self.assertIn("~/.claude-old: no plan usage", r.stdout)
+        line = next(ln for ln in r.stdout.splitlines() if ln.startswith("second"))
+        self.assertIn("Max 20x", line)
+        self.assertIn("cooling", line)  # 5-hour meter at 100% counts as cooling until it resets
+        self.assertIn("official: week 41% · week · Opus 12% · 5h 100%", line)
+        page_r = self.run_tool("usage", "--html", "--no-open")
+        self.assertEqual(page_r.returncode, 0, page_r.stderr)
+        self.assertIn("week · Opus", (self.home / ".config/claude-move/usage.html").read_text())
+
+
+class Plan(unittest.TestCase):
+    def test_plan_names(self):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("cm", str(TOOL))
+        spec = importlib.util.spec_from_loader("cm", loader)
+        cm = importlib.util.module_from_spec(spec)
+        loader.exec_module(cm)
+        self.assertEqual(cm.plan_name({"organizationType": "claude_max", "organizationRateLimitTier": "default_claude_max_5x"}), "Max 5x")
+        self.assertEqual(cm.plan_name({"organizationType": "claude_pro", "organizationRateLimitTier": "default_claude_pro"}), "Pro")
+        self.assertEqual(cm.plan_name({}), "")
+
+
+class Panel(unittest.TestCase):
+    """panel: token-gated local server; the switch button checks who is signed in, then quits, moves, reopens."""
+    setUp, tearDown = Usage.setUp, Usage.tearDown
+
+    def start(self):
+        import re
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
+                   CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1",
+                   CLAUDE_MOVE_QUIT_CMD=f"touch {self.home}/quit", CLAUDE_MOVE_OPEN_CMD=f"touch {self.home}/open")
+        self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open"], stdout=subprocess.PIPE, text=True, env=env)
+        self.addCleanup(lambda: (self.proc.kill(), self.proc.wait(), self.proc.stdout.close()))
+        line = self.proc.stdout.readline()
+        m = re.search(r"http://127\.0\.0\.1:(\d+)/\?t=(\S+)", line)
+        self.port, self.token = int(m.group(1)), m.group(2)
+
+    def call(self, path, body=None, token=True, host=None):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-Token"] = self.token
+        if host:
+            headers["Host"] = host
+        c.request("POST" if body is not None else "GET", path, json.dumps(body) if body is not None else None, headers)
+        r = c.getresponse()
+        return r.status, r.read().decode()
+
+    def test_panel_switch_flow(self):
+        # a third account the app is signed into now, with an empty list (just opened the Code tab)
+        c = "cccccccc-0000-0000-0000-000000000003"
+        (self.root / c / "org").mkdir(parents=True)
+        log = self.home / "Library/Logs/Claude/main.log"
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.now - 10))
+        log.write_text(log.read_text() + f"{stamp} [info] [oauth-v2] lookup orgId=x cacheKey=acct:{c}|y:x:https:/\n")
+        self.start()
+        self.assertEqual(self.call("/state", token=False)[0], 403)
+        self.assertEqual(self.call("/state", host="evil.example:80")[0], 403)
+        code, page = self.call(f"/?t={self.token}", token=False)
+        self.assertEqual(code, 200)
+        self.assertIn('id="go"', page)
+        state = json.loads(self.call("/state")[1])
+        self.assertEqual(state["signed"]["acct"], c)
+        self.assertTrue(state["source"]["acct"] in (self.a, self.b))
+        # refuses an account the app is not signed into
+        r = json.loads(self.call("/switch", {"to": self.a})[1])
+        self.assertFalse(r["ok"])
+        self.assertFalse((self.home / "quit").exists())
+        r = json.loads(self.call("/switch", {"to": c})[1])
+        self.assertTrue(r["ok"], r["log"])
+        self.assertTrue((self.home / "quit").exists() and (self.home / "open").exists())
+        self.assertTrue((self.root / c / "org" / "local_1.json").exists())
+
+    def test_usage_text_fallback(self):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("cm2", str(TOOL))
+        spec = importlib.util.spec_from_loader("cm2", loader)
+        cm = importlib.util.module_from_spec(spec)
+        loader.exec_module(cm)
+        # the structured report can come back with limits: null while the text still has the meters
+        msg = {"type": "assistant", "usage_report": {"rate_limits": {"limits": None}},
+               "message": {"content": [{"type": "text", "text": "Current session: 7% used · resets 3pm (UTC)\n"
+                                        "Current week (all models): 96% used · resets Oct 27 at 10am (Asia/Singapore)\n"
+                                        "Current week (Fable): 0% used"}]}}
+        rows = cm.parse_usage_report(json.dumps(msg))
+        self.assertEqual([(r["kind"], r["percent"], r["scope"]) for r in rows],
+                         [("session", 7.0, None), ("weekly_all", 96.0, None), ("weekly_scoped", 0.0, "Fable")])
+        self.assertEqual(time.strftime("%m-%d %H:%M", time.gmtime(rows[1]["resets_at"])), "10-27 02:00")
+
+
+class PanelLifecycle(unittest.TestCase):
+    setUp, tearDown = Usage.setUp, Usage.tearDown
+
+    def env(self):
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
+                   CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1")
+        return env
+
+    def test_second_launch_reuses_and_idle_stops(self):
+        first = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open", "--idle", "1"],
+                                 stdout=subprocess.PIPE, text=True, env=self.env())
+        self.addCleanup(lambda: (first.kill(), first.wait(), first.stdout.close()))
+        url = first.stdout.readline().split()[3]
+        second = subprocess.run([sys.executable, str(TOOL), "panel", "--no-open"], capture_output=True, text=True,
+                                env=self.env(), timeout=30)
+        self.assertIn(url, second.stdout)  # no second server
+        self.assertEqual(first.wait(timeout=30), 0)  # nobody polls, so it stops after the idle limit
+        self.assertFalse((self.home / ".config/claude-move/panel.json").exists())
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS only")
+    def test_app_bundle(self):
+        r = subprocess.run([sys.executable, str(TOOL), "app", "install", "--dir", str(self.home / "Apps"), "--no-dock"],
+                           capture_output=True, text=True, env=self.env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        app = self.home / "Apps" / "Claude Move.app"
+        launch = (app / "Contents/Resources/launch.sh").read_text()
+        self.assertIn("panel --here --idle 1800", launch)
+        self.assertTrue((app / "Contents/Resources/applet.icns").stat().st_size > 1000)
+        self.assertFalse((app / "Contents/Resources/Assets.car").exists())
+        v = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True)
+        self.assertEqual(v.returncode, 0, v.stderr)
+
+
+class Help(unittest.TestCase):
+    def test_every_help_renders(self):
+        for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["watch"]):
+            r = subprocess.run([sys.executable, str(TOOL), *args, "--help"], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, (args, r.stderr[-300:]))

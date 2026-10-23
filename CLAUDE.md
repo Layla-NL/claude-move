@@ -1,0 +1,22 @@
+# Maintaining claude-move
+
+If `HANDOFF.md` exists next to this file, read it first: it holds the local state (what is pushed, what is not, which accounts this Mac has).
+
+## Rules
+
+- Single file, standard library only, runs on macOS's own Python 3.9. No new dependencies.
+- Copy only: never delete session entries on either account; back up the target before writing; keep `undo` working.
+- Never read or use login credentials, and never change which account the desktop app is signed into. Official numbers come only from the limit messages in transcripts, the CLI's `/usage`, and the CLI status line's `rate_limits`. Do not show estimated percentages.
+- Every user-facing string goes through the `T` table with English and Chinese.
+- argparse help strings: write `%%` for a literal percent sign.
+- The panel serves 127.0.0.1 only, with a one-time token and a Host check; its buttons do fixed actions only.
+- After changing anything inside `Claude Move.app`, drop `Assets.car` and `CFBundleIconName` and re-sign ad hoc (`app install` does this).
+- The repo's default app icon stays the generic one in `ICON_PNG`; do not commit Anthropic's mascot.
+
+## Before you commit
+
+```bash
+python3 -W error::ResourceWarning -m unittest discover tests
+```
+
+Update `CHANGELOG.md` and both language sections of `README.md`. Commit as `Layla <335815953+Layla-NL@users.noreply.github.com>`. Ask the user before pushing, tagging or publishing a release.
