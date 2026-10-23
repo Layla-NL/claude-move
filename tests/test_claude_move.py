@@ -141,3 +141,114 @@ class ClaudeMove(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def iso(sec):
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(sec))
+
+
+def reply(sid, sec, msg_id, model="claude-opus-5-5", out=1000, entry="claude-desktop"):
+    return {"type": "assistant", "sessionId": sid, "timestamp": iso(sec), "entrypoint": entry, "requestId": "r" + msg_id,
+            "message": {"id": msg_id, "model": model, "usage": {"input_tokens": 0, "output_tokens": out}}}
+
+
+def limit_hit(sid, sec, kind, resets, entry="claude-desktop"):
+    return {"type": "assistant", "sessionId": sid, "timestamp": iso(sec), "entrypoint": entry, "apiError": "usage_limit_reached",
+            "apiErrorParams": {"rate_limit_info": {"status": "rejected", "resetsAt": resets, "rateLimitType": kind}},
+            "message": {"id": "err" + str(sec), "model": "<synthetic>", "usage": {"input_tokens": 0, "output_tokens": 0}}}
+
+
+class Usage(unittest.TestCase):
+    """usage attributes desktop replies by who was signed in (from the app log), CLI replies by config folder."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self.root = self.home / "sessions"
+        self.desk = self.home / "desk"
+        self.now = time.time()
+        a, b = "aaaaaaaa-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000002"
+        self.a, self.b = a, b
+        # the same session sits in both lists, as after a move
+        for acct in (a, b):
+            write(self.root / acct / "org" / "local_1.json", sessionId="local_1", cliSessionId="s1",
+                  lastActivityAt=int(self.now * 1000))
+        switch = self.now - 3600
+        log = self.home / "Library/Logs/Claude/main.log"
+        log.parent.mkdir(parents=True)
+        stamp = lambda s: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(s))
+        log.write_text(f"{stamp(self.now - 86400)} [info] [oauth-v2] lookup orgId=x cacheKey=acct:{a}|y:x:https:/\n"
+                       f"{stamp(switch)} [info] [oauth-v2] lookup orgId=x cacheKey=acct:{b}|y:x:https:/\n")
+        lines = [reply("s1", self.now - 7200, "m1"), reply("s1", self.now - 7200, "m1"),  # duplicate block
+                 limit_hit("s1", self.now - 7000, "five_hour", int(self.now + 3600)),
+                 reply("s1", self.now - 600, "m2", out=2000),
+                 reply("s9", self.now - 300, "m3", out=100000, entry="cli")]
+        t = self.desk / "projects" / "-p" / "s1.jsonl"
+        t.parent.mkdir(parents=True)
+        t.write_text("".join(json.dumps(x) + "\n" for x in lines))
+        self.transcript = t
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_tool(self, *args, stdin=None, **env_extra):
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
+                   CLAUDE_MOVE_LANG="en", **env_extra)
+        return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, env=env, input=stdin)
+
+    def test_attribution_cooling_and_pick(self):
+        self.run_tool("name", "aaaa", "first")
+        self.run_tool("name", "bbbb", "second")
+        r = self.run_tool("usage")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = {ln.split()[0]: ln for ln in r.stdout.splitlines() if ln.split()}
+        # m1 ($0.125, once despite the duplicate) and the limit hit happened while "first" was signed in
+        self.assertIn("cooling", lines["first"])
+        self.assertIn("5-hour limit used up", lines["first"])
+        self.assertIn("available", lines["second"])
+        self.assertIn("5h $0", lines["first"])
+        self.assertIn("$0 at API prices", lines["first"])
+        self.assertIn("CLI, account unknown", r.stdout)
+        self.assertIn("switch to: second", r.stdout)
+
+    def test_cache_is_incremental(self):
+        self.run_tool("usage")
+        with open(self.transcript, "a") as fh:
+            fh.write(json.dumps(reply("s1", self.now - 60, "m4", out=200000)) + "\n")
+        r = self.run_tool("usage")
+        line = next(ln for ln in r.stdout.splitlines() if ln.startswith("bbbbbbbb"))
+        self.assertIn("5h $5", line)  # 2000 + 200000 output tokens at opus prices = $5.05
+
+    def test_html_panel(self):
+        r = self.run_tool("usage", "--html", "--no-open")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        page = (self.home / ".config/claude-move/usage.html").read_text()
+        self.assertIn("<!doctype html>", page)
+        self.assertIn("prefers-color-scheme:dark", page)
+
+    def test_watch_records_official_limits_and_restores_old_status_line(self):
+        cfg = self.home / "cli"
+        cfg.mkdir()
+        (cfg / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
+        (cfg / "settings.json").write_text(json.dumps({"theme": "dark", "statusLine": {"type": "command", "command": "echo old"}}))
+        r = self.run_tool("watch", "install", CLAUDE_CONFIG_DIR=str(cfg))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        cmd = json.loads((cfg / "settings.json").read_text())["statusLine"]["command"]
+        self.assertIn("watch record", cmd)
+        payload = json.dumps({"rate_limits": {"five_hour": {"used_percentage": 23.5, "resets_at": 1},
+                                              "seven_day": {"used_percentage": 41.2, "resets_at": 2}}})
+        r = self.run_tool("watch", "record", stdin=payload, CLAUDE_CONFIG_DIR=str(cfg))
+        self.assertEqual(r.stdout.strip(), "old")  # the previous status line still shows
+        saved = json.loads((self.home / ".config/claude-move/limits.json").read_text())
+        self.assertEqual(saved[self.b]["seven_day"]["used_percentage"], 41.2)
+        r = self.run_tool("usage")
+        self.assertIn("official: week 41% · 5h 24%", r.stdout)
+        self.run_tool("watch", "uninstall", CLAUDE_CONFIG_DIR=str(cfg))
+        s = json.loads((cfg / "settings.json").read_text())
+        self.assertEqual(s["statusLine"]["command"], "echo old")
+        self.assertEqual(s["theme"], "dark")
+
+    def test_watch_record_never_fails(self):
+        r = self.run_tool("watch", "record", stdin="not json")
+        self.assertEqual(r.returncode, 0, r.stderr)

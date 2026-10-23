@@ -18,6 +18,8 @@ Usage:
   claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]
   claude-move undo [--list] [--backup NAME] [--dry-run]
   claude-move import-cli [--config DIR] [--project PATH] [--session ID ...] [--days N] [--dry-run]
+  claude-move usage [--html] [--config DIR ...]
+  claude-move watch install|uninstall
 <account> is a label you gave with `name`, or the first characters of the account id.
 """
 import argparse
@@ -28,9 +30,10 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
 ROOT = Path(os.environ.get("CLAUDE_MOVE_ROOT", str(HOME / "Library/Application Support/Claude/claude-code-sessions")))
@@ -97,6 +100,40 @@ T = {
     "same_cfg": ("Source and target config folders are the same.", "来源和目标是同一个配置目录。"),
     "done": ("Moved {n}. Reopen the desktop app. Transcripts in ~/.claude/projects were never touched.",
              "搬好了 {n} 个。现在重新打开桌面 App。会话的完整记录本来就在 ~/.claude/projects，不用动。"),
+    "u_title": ("Quota by account: cooling and reset times from the official limit messages, use counted from this Mac's transcripts, official % only from the CLI status line",
+                "各账号额度：冷却和恢复时间来自官方的限额提示，用量按本机会话记录统计，官方百分比只来自命令行版状态栏"),
+    "u_cool": ("cooling   {k} limit used up, back at {w}", "冷却中    {k}额度用完，{w} 恢复"),
+    "u_ok": ("available", "可用    "),
+    "u_week": ("week", "本周"),
+    "u_5h": ("5h", "5 小时"),
+    "u_7d": ("7 days", "近 7 天"),
+    "u_kind_week": ("weekly", "每周"),
+    "u_kind_5h": ("5-hour", "5 小时"),
+    "u_official": ("official: week {w}% · 5h {f}% ({a} ago, CLI)", "官方：本周 {w}% · 5 小时 {f}%（{a}前，命令行）"),
+    "u_spent": ("{k} ${d:.0f} at API prices", "{k}折合 API 价 ${d:.0f}"),
+    "u_reset": ("week resets {w}", "本周 {w} 重置"),
+    "u_tag_pick": ("switch here", "建议换到这个"),
+    "u_head": ("Quota by account", "各账号额度"),
+    "u_back": ("{k} limit used up · back at {w}", "{k}额度用完 · {w} 恢复"),
+    "u_off_head": ("Official, from the CLI {a} ago", "官方数据，{a}前在命令行记下"),
+    "u_cli_head": ("CLI", "命令行"),
+    "u_tag_cool": ("cooling", "冷却中"),
+    "u_pick": ("-> switch to: {a} (not cooling, least used this week)", "→ 建议换到：{a}（没在冷却，这周用得最少）"),
+    "u_pick_none": ("-> every account is cooling; the first one back is {a} at {w}", "→ 所有账号都在冷却，最早恢复的是 {a}，{w}"),
+    "u_unmapped": ("CLI, account unknown (pass --config DIR to attribute)", "命令行，分不清是哪个号（用 --config 指定配置目录可以归到账号）"),
+    "u_notes": ("Use is priced at API list prices only to compare accounts; it counts Claude Code on this Mac, not claude.ai chat or other devices.",
+                "用量按 API 价折算，只用来比较几个号谁用得多；只算这台 Mac 上的 Claude Code，网页聊天和别的设备上的用量算不进来。"),
+    "u_html": ("Panel written to {p}", "面板已生成：{p}"),
+    "u_scan": ("Reading transcripts (first run can take a minute; later runs are incremental)...",
+               "正在读会话记录（第一次可能要一分钟，之后只读新增的）……"),
+    "w_on": ("Status line recorder installed in {p}. Each refresh of the Claude Code CLI status line now saves the official 5-hour/weekly % for the signed-in account.",
+             "已在 {p} 装好状态栏记录器。之后命令行版 Claude Code 每刷新一次状态栏，就记下当前账号官方的 5 小时/每周百分比。"),
+    "w_chain": ("Your existing status line is kept and still shown.", "你原来的状态栏保留，照样显示。"),
+    "w_already": ("Already installed in {p}.", "{p} 里已经装过了。"),
+    "w_off": ("Removed from {p}; your previous status line setting is back.", "已从 {p} 移除，原来的状态栏设置已恢复。"),
+    "w_none": ("Not installed in {p}.", "{p} 里没装。"),
+    "w_desktop": ("Note: the desktop app's Code tab does not run status line scripts, so only CLI use is recorded.",
+                  "注意：桌面 App 的 Code 页不运行状态栏脚本，只有用命令行版时才会记录。"),
 }
 
 
@@ -405,6 +442,426 @@ def cmd_import_cli(args):
     print(t("imp_done", n=len(todo)))
 
 
+# ---------- quota panel: usage / watch
+CONF = NAMES.parent
+CACHE = Path(os.environ.get("CLAUDE_MOVE_CACHE", str(HOME / ".cache/claude-move/usage-v2.json")))
+LOGS = Path(os.environ.get("CLAUDE_MOVE_LOGS", str(HOME / "Library/Logs/Claude")))
+LIMITS = CONF / "limits.json"
+WATCH = CONF / "watch.json"
+KEEP_DAYS = 35
+WEEK, FIVE_H = 7 * 86400, 5 * 3600
+# $ per million input tokens; output, cache writes and cache reads scale from it as in the public price list
+PRICE_IN = {"opus": 5.0, "fable": 5.0, "sonnet": 3.0, "haiku": 1.0}
+
+
+def iso_ts(s):
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, ValueError):
+        return None
+
+
+def api_dollars(model, u):
+    fam = next((k for k in PRICE_IN if k in (model or "")), "opus")
+    tokens = ((u.get("input_tokens") or 0) + 1.25 * (u.get("cache_creation_input_tokens") or 0)
+              + 0.1 * (u.get("cache_read_input_tokens") or 0) + 5 * (u.get("output_tokens") or 0))
+    return tokens * PRICE_IN[fam] / 1e6
+
+
+def scan_file(path, start):
+    """Usage and limit-hit records appended to one transcript since byte offset `start`."""
+    recs, hits = [], []
+    with open(path, "rb") as fh:
+        fh.seek(start)
+        data = fh.read()
+    end = data.rfind(b"\n") + 1  # leave a half-written last line for the next run
+    for raw in data[:end].splitlines():
+        if b'"usage"' not in raw and b"usage_limit_reached" not in raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue
+        ts = iso_ts(rec.get("timestamp") or "")
+        sid = rec.get("sessionId")
+        if ts is None or not sid:
+            continue
+        ep = {"claude-desktop": "d", "cli": "c"}.get(rec.get("entrypoint"), "")
+        info = (rec.get("apiErrorParams") or {}).get("rate_limit_info")
+        if rec.get("apiError") == "usage_limit_reached" and isinstance(info, dict) and info.get("resetsAt"):
+            hits.append([ts, sid, info.get("rateLimitType") or "", info["resetsAt"], ep])
+            continue
+        msg = rec.get("message") or {}
+        u = msg.get("usage")
+        if rec.get("type") == "assistant" and isinstance(u, dict) and msg.get("id") and msg.get("model") != "<synthetic>":
+            recs.append([ts, sid, msg["id"], round(api_dollars(msg.get("model"), u), 6), ep])
+    return recs, hits, start + end
+
+
+def scan(roots):
+    """Incrementally read transcripts under each root's projects/; cache per file by offset."""
+    cache = load(CACHE) or {}
+    if cache.get("v") != 2:
+        cache = {"v": 2, "files": {}}
+    files, cutoff, seen = cache["files"], time.time() - KEEP_DAYS * 86400, set()
+    for root in roots:
+        for p in (root / "projects").rglob("*.jsonl") if (root / "projects").is_dir() else []:
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            if st.st_mtime < cutoff:
+                continue
+            key = str(p)
+            seen.add(key)
+            c = files.get(key)
+            if not c or c["size"] > st.st_size or c.get("ino") != st.st_ino:
+                c = files[key] = {"size": 0, "off": 0, "ino": st.st_ino, "recs": [], "hits": [], "root": str(root)}
+            if st.st_size > c["off"]:
+                recs, hits, off = scan_file(p, c["off"])
+                c["recs"] += recs
+                c["hits"] += hits
+                c["off"], c["size"] = off, st.st_size
+            c["recs"] = [r for r in c["recs"] if r[0] >= cutoff]
+    for key in [k for k in files if k not in seen]:
+        del files[key]
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE.write_text(json.dumps(cache, separators=(",", ":")))
+    recs, hits, dedup = [], [], set()
+    for c in files.values():
+        for r in c["recs"]:
+            if r[2] not in dedup:  # a reply is written once per content block, and resumed sessions copy history
+                dedup.add(r[2])
+                recs.append(r + [c["root"]])
+        hits += [h + [c["root"]] for h in c["hits"]]
+    return recs, hits
+
+
+def cli_account(cfg):
+    """Account id the CLI config folder is signed into (from its .claude.json; no tokens are read)."""
+    p = HOME / ".claude.json" if cfg == HOME / ".claude" else cfg / ".claude.json"
+    d = load(p)
+    oa = d.get("oauthAccount") if isinstance(d, dict) else None
+    return oa.get("accountUuid") if isinstance(oa, dict) else None
+
+
+def signin_timeline():
+    """When each account was signed into the desktop app, from the app's log lines that name the account it is
+    looking up (`cacheKey=acct:<id>`). Only ids and times are read. Returns [(epoch, account id)] at each change."""
+    import re
+    pat = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) .*?cacheKey=acct:([0-9a-f-]{36})")
+    points = []
+    for f in sorted(LOGS.glob("main*.log")) if LOGS.is_dir() else []:
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if "cacheKey=acct:" in line:
+                        m = pat.match(line)
+                        if m:
+                            points.append((time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")), m.group(2)))
+        except OSError:
+            continue
+    points.sort()
+    out = []
+    for ts, acct in points:
+        if not out or out[-1][1] != acct:
+            out.append((ts, acct))
+    return out
+
+
+def signed_in(timeline, ts):
+    if not timeline or ts < timeline[0][0] - 3600:
+        return None
+    acct = None
+    for start, a in timeline:
+        if start > ts:
+            break
+        acct = a
+    return acct or timeline[0][1]
+
+
+def owner_index(accts):
+    """cliSessionId -> [(lastActivityAt seconds, account id)], one entry per account list holding the session."""
+    idx = {}
+    for a in accts:
+        for _, d in a["sessions"]:
+            if d.get("cliSessionId"):
+                idx.setdefault(d["cliSessionId"], []).append(((d.get("lastActivityAt") or 0) / 1000, a["acct"]))
+    for v in idx.values():
+        v.sort()
+    return idx
+
+
+def owner(idx, sid, ts, fallback):
+    """A session copied between accounts sits in several lists. The desktop app only bumps lastActivityAt in the
+    account that is signed in, so a reply belongs to the first account whose entry was last active at or after it."""
+    cands = idx.get(sid)
+    if not cands:
+        return fallback
+    for last, acct in cands:
+        if last >= ts - 60:
+            return acct
+    return cands[-1][1]
+
+
+def week_window(hits7, now):
+    """Weekly windows reset at a fixed time; step the last known reset forward to find the current one."""
+    if not hits7:
+        return None, None
+    r = max(h[3] for h in hits7)
+    if now < r:
+        return r - WEEK, r
+    n = int((now - r) // WEEK)
+    return r + n * WEEK, r + (n + 1) * WEEK
+
+
+def ago(sec):
+    m = int(sec // 60)
+    if ZH:
+        return f"{m} 分钟" if m < 120 else f"{m // 60} 小时"
+    return f"{m} min" if m < 120 else f"{m // 60} h"
+
+
+def clock(ts):
+    return time.strftime("%m-%d %H:%M", time.localtime(ts))
+
+
+def usage_report(extra_cfgs=(), now=None):
+    now = now or time.time()
+    accts = accounts()
+    idx = owner_index(accts)
+    roots = [DESKTOP_HOME] + [Path(os.path.expanduser(c)) for c in extra_cfgs]
+    fallback = {str(DESKTOP_HOME): None}
+    for c in roots[1:]:
+        fallback[str(c)] = cli_account(c)
+    recs, hits = scan(roots)
+    timeline = signin_timeline()
+
+    def who(ts, sid, ep, root):
+        # desktop replies run as whoever is signed into the app; CLI replies as the config folder's account
+        if ep == "d":
+            return signed_in(timeline, ts) or owner(idx, sid, ts, None)
+        if ep == "c":
+            return fallback.get(root)
+        return owner(idx, sid, ts, fallback.get(root))
+
+    by = {}
+    for r in recs:
+        by.setdefault(who(r[0], r[1], r[4], r[5]), {"recs": [], "hits": []})["recs"].append(r)
+    for h in hits:
+        by.setdefault(who(h[0], h[1], h[4], h[5]), {"recs": [], "hits": []})["hits"].append(h)
+    official = load(LIMITS) or {}
+    ids = {a["acct"] for a in accts if a["sessions"]} | {k for k in by if k} | set(official)
+    rows = []
+    for acct in ids:
+        b = by.get(acct, {"recs": [], "hits": []})
+        h7 = [h for h in b["hits"] if h[2] == "seven_day"]
+        w0, w1 = week_window(h7, now)
+        spent_week = sum(r[3] for r in b["recs"] if r[0] >= (w0 if w0 else now - WEEK))
+        spent_5h = sum(r[3] for r in b["recs"] if r[0] >= now - FIVE_H)
+        cool = [h for h in b["hits"] if h[3] > now]
+        cool = max(cool, key=lambda h: h[3]) if cool else None
+        off = official.get(acct)
+        daily = [round(sum(r[3] for r in b["recs"] if now - (i + 1) * 86400 <= r[0] < now - i * 86400), 2)
+                 for i in range(6, -1, -1)]
+        rows.append({
+            "acct": acct, "name": names().get(acct, "") or acct[:8],
+            "cool": {"kind": cool[2], "until": cool[3]} if cool else None,
+            "week_usd": spent_week, "five_usd": spent_5h, "week_reset": w1, "daily": daily,
+            "official": off if isinstance(off, dict) and now - off.get("at", 0) < 3 * 86400 else None,
+            "last": max((r[0] for r in b["recs"]), default=0)})
+    unmapped = by.get(None)
+    rows.sort(key=lambda r: r["last"], reverse=True)
+    free = [r for r in rows if not r["cool"]]
+    pct = lambda r: ((r["official"] or {}).get("seven_day") or {}).get("used_percentage")
+    pick = min(free, key=lambda r: (pct(r) is None, pct(r) or 0, r["week_usd"])) if free else None
+    first_back = min(rows, key=lambda r: r["cool"]["until"]) if rows and not free else None
+    return {"now": now, "rows": rows, "pick": pick, "first_back": first_back,
+            "unmapped_usd": sum(r[3] for r in unmapped["recs"] if r[0] >= now - WEEK) if unmapped else 0}
+
+
+def row_text(r, now):
+    parts = []
+    off = r["official"]
+    if off:
+        parts.append(t("u_official", w=round((off.get("seven_day") or {}).get("used_percentage", 0)),
+                       f=round((off.get("five_hour") or {}).get("used_percentage", 0)), a=ago(now - off["at"])))
+    parts.append(t("u_spent", k=t("u_week") if r["week_reset"] else t("u_7d"), d=r["week_usd"]))
+    parts.append(t("u_spent", k=t("u_5h"), d=r["five_usd"]))
+    if r["week_reset"]:
+        parts.append(t("u_reset", w=clock(r["week_reset"])))
+    if r["cool"]:
+        k = t("u_kind_week") if r["cool"]["kind"] == "seven_day" else t("u_kind_5h")
+        return t("u_cool", k=k, w=clock(r["cool"]["until"])) + " · " + " · ".join(parts)
+    return t("u_ok") + "  " + " · ".join(parts)
+
+
+def cmd_usage(args):
+    print(t("u_scan"), file=sys.stderr)
+    rep = usage_report(args.config or ())
+    print(t("u_title"))
+    for r in rep["rows"]:
+        print(f"{r['name']:10} {row_text(r, rep['now'])}")
+    if rep["unmapped_usd"] >= 1:
+        print(f"{'-':10} {t('u_unmapped')}: " + t("u_spent", k=t("u_week"), d=rep["unmapped_usd"]))
+    if rep["pick"]:
+        print(t("u_pick", a=rep["pick"]["name"]))
+    elif rep["first_back"]:
+        print(t("u_pick_none", a=rep["first_back"]["name"], w=clock(rep["first_back"]["cool"]["until"])))
+    print(t("u_notes"))
+    if args.html:
+        out = CONF / "usage.html"
+        CONF.mkdir(parents=True, exist_ok=True)
+        out.write_text(render_html(rep), encoding="utf-8")
+        print(t("u_html", p=out))
+        if not args.no_open and sys.platform == "darwin":
+            subprocess.run(["open", str(out)], check=False)
+
+
+def render_html(rep):
+    from html import escape
+    now = rep["now"]
+    peak = max([max(r["daily"]) for r in rep["rows"]] + [1])
+    days = [time.strftime("%m-%d", time.localtime(now - i * 86400)) for i in range(6, -1, -1)]
+    cards = []
+    for r in rep["rows"]:
+        state = "cool" if r["cool"] else ("pick" if rep["pick"] is r else "ok")
+        badge = {"cool": t("u_tag_cool"), "pick": t("u_tag_pick"), "ok": t("u_ok").strip()}[state]
+        cool = ""
+        if r["cool"]:
+            k = t("u_kind_week") if r["cool"]["kind"] == "seven_day" else t("u_kind_5h")
+            cool = f'<p class="coolline">{escape(t("u_back", k=k, w=clock(r["cool"]["until"])))}</p>'
+        week_label = t("u_week") if r["week_reset"] else t("u_7d")
+        nums = (f'<div class="nums"><div><b>${r["week_usd"]:,.0f}</b><span>{escape(week_label)}</span></div>'
+                f'<div><b>${r["five_usd"]:,.0f}</b><span>{escape(t("u_5h"))}</span></div></div>')
+        meters = ""
+        off = r["official"]
+        if off:
+            for key, label in (("seven_day", t("u_week")), ("five_hour", t("u_5h"))):
+                if isinstance(off.get(key), dict):
+                    pc = off[key].get("used_percentage", 0)
+                    meters += (f'<div class="m"><span>{escape(label)}</span><div class="bar"><i style="width:{min(100, pc)}%">'
+                               f'</i></div><b>{pc:.0f}%</b></div>')
+            meters = (f'<div class="official"><p>{escape(t("u_off_head", a=ago(now - off["at"])))}</p>{meters}</div>')
+        bars = "".join(
+            f'<div class="day" title="{days[i]} ${v:,.0f}"><i style="height:{max(2, 100 * v / peak):.0f}%"></i>'
+            f'<span>{days[i][3:]}</span></div>' for i, v in enumerate(r["daily"]))
+        foot = f'<p class="foot">{escape(t("u_reset", w=clock(r["week_reset"])))}</p>' if r["week_reset"] else ""
+        cards.append(f'<section class="card {state}"><header><h2>{escape(r["name"])}</h2>'
+                     f'<span class="badge">{escape(badge)}</span></header>{cool}{nums}{meters}'
+                     f'<div class="days">{bars}</div>{foot}</section>')
+    if rep["unmapped_usd"] >= 1:
+        cards.append(f'<section class="card muted"><header><h2>{escape(t("u_cli_head"))}</h2></header>'
+                     f'<div class="nums"><div><b>${rep["unmapped_usd"]:,.0f}</b><span>{escape(t("u_7d"))}</span></div></div>'
+                     f'<p class="foot">{escape(t("u_unmapped"))}</p></section>')
+    if rep["pick"]:
+        pick = t("u_pick", a=rep["pick"]["name"])
+    elif rep["first_back"]:
+        pick = t("u_pick_none", a=rep["first_back"]["name"], w=clock(rep["first_back"]["cool"]["until"]))
+    else:
+        pick = ""
+    return f"""<!doctype html><html lang="{'zh' if ZH else 'en'}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>claude-move usage</title><style>
+:root{{--bg:#f5f6f8;--card:#fff;--ink:#1c2230;--dim:#6a7284;--line:#e4e7ed;--ok:#23955f;--cool:#d64545;--bar:#b8c2d4;--off:#3274e8}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#10141b;--card:#19202a;--ink:#e9edf4;--dim:#8f99aa;--line:#28303d;--bar:#4a5568;--ok:#3fbf83;--cool:#ef6b6b;--off:#5b93f5}}}}
+*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}}
+main{{max-width:1040px;margin:0 auto;padding:28px 16px 40px}} h1{{font-size:22px;margin:0}} .sub{{color:var(--dim);font-size:13px;margin:4px 0 20px}}
+.advice{{font-weight:600;margin:0 0 16px;color:var(--ok)}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}} .card.pick{{border:2px solid var(--ok)}} .card.cool{{border-color:var(--cool)}} .card.muted{{opacity:.8}}
+header{{display:flex;justify-content:space-between;align-items:center;gap:8px}} h2{{margin:0;font-size:18px}}
+.badge{{font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}}
+.cool .badge{{background:color-mix(in srgb,var(--cool) 14%,transparent);color:var(--cool)}} .coolline{{color:var(--cool);font-weight:600;margin:10px 0 0}}
+.nums{{display:flex;gap:28px;margin:14px 0 6px}} .nums b{{display:block;font-size:26px;font-variant-numeric:tabular-nums;letter-spacing:-.5px}} .nums span{{color:var(--dim);font-size:12px}}
+.official{{margin:10px 0 4px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--off) 8%,transparent)}} .official p{{margin:0 0 4px;font-size:12px;color:var(--dim)}}
+.m{{display:grid;grid-template-columns:52px 1fr 44px;gap:8px;align-items:center;font-size:13px;margin:4px 0}} .bar{{height:8px;background:var(--line);border-radius:4px;overflow:hidden}}
+.bar i{{display:block;height:100%;background:var(--off)}} .m b{{text-align:right;font-variant-numeric:tabular-nums}}
+.days{{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;height:76px;margin-top:12px;align-items:end}}
+.day{{height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}} .day i{{width:100%;max-width:26px;background:var(--bar);border-radius:4px 4px 2px 2px}}
+.day span{{font-size:10px;color:var(--dim)}} .foot{{color:var(--dim);font-size:12px;margin:10px 0 0}}
+.notes{{color:var(--dim);font-size:12px;margin-top:22px}}
+</style></head><body><main><h1>{escape(t("u_head"))}</h1><p class="sub">{escape(clock(now))} · claude-move {__version__}</p>
+<p class="advice">{escape(pick)}</p><div class="grid">{"".join(cards)}</div>
+<p class="notes">{escape(t("u_title"))}<br>{escape(t("u_notes"))}</p></main></body></html>"""
+
+
+def settings_path():
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(os.path.expanduser(cfg)) / "settings.json" if cfg else DESKTOP_HOME / "settings.json"
+
+
+def recorder_command():
+    return f"{sys.executable} {Path(__file__).resolve()} watch record"
+
+
+def cmd_watch(args):
+    sp = settings_path()
+    state = load(WATCH) or {}
+    s = load(sp) or {}
+    mine = isinstance(s.get("statusLine"), dict) and "watch record" in (s["statusLine"].get("command") or "")
+    if args.action == "install":
+        if mine:
+            print(t("w_already", p=sp))
+            return
+        prev = s.get("statusLine")
+        state[str(sp)] = {"previous": prev}
+        CONF.mkdir(parents=True, exist_ok=True)
+        WATCH.write_text(json.dumps(state, indent=2) + "\n")
+        s["statusLine"] = {"type": "command", "command": recorder_command()}
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        sp.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n")
+        print(t("w_on", p=sp))
+        if prev:
+            print(t("w_chain"))
+        print(t("w_desktop"))
+    elif args.action == "uninstall":
+        if not mine:
+            print(t("w_none", p=sp))
+            return
+        prev = (state.pop(str(sp), None) or {}).get("previous")
+        if prev:
+            s["statusLine"] = prev
+        else:
+            s.pop("statusLine", None)
+        sp.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n")
+        WATCH.write_text(json.dumps(state, indent=2) + "\n")
+        print(t("w_off", p=sp))
+    else:
+        watch_record(sp, state)
+
+
+def watch_record(sp, state):
+    """Status line hook: save the official rate limits for the signed-in account, then show the old status line."""
+    raw = sys.stdin.read()
+    shown = ""
+    try:
+        d = json.loads(raw)
+        rl = d.get("rate_limits")
+        cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+        acct = cli_account(Path(os.path.expanduser(cfg)) if cfg else HOME / ".claude")
+        if isinstance(rl, dict) and acct:
+            cur = load(LIMITS) or {}
+            cur[acct] = {"at": time.time(), **{k: v for k, v in rl.items() if k in ("five_hour", "seven_day")}}
+            CONF.mkdir(parents=True, exist_ok=True)
+            tmp = LIMITS.with_suffix(".tmp")
+            tmp.write_text(json.dumps(cur, indent=2) + "\n")
+            tmp.replace(LIMITS)
+            f5 = (rl.get("five_hour") or {}).get("used_percentage")
+            f7 = (rl.get("seven_day") or {}).get("used_percentage")
+            shown = " · ".join(x for x in (f"5h {f5:.0f}%" if f5 is not None else "", f"7d {f7:.0f}%" if f7 is not None else "") if x)
+    except Exception:  # a status line must never break the CLI
+        pass
+    prev = (state.get(str(sp)) or {}).get("previous")
+    if isinstance(prev, dict) and prev.get("command"):
+        try:
+            out = subprocess.run(prev["command"], shell=True, input=raw, capture_output=True, text=True, timeout=5).stdout
+            print(out.rstrip("\n"))
+            return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    print(shown)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="claude-move",
                                 description="Move the Claude desktop app's Code session list between accounts (copy only).")
@@ -439,6 +896,14 @@ def main(argv=None):
     ic.add_argument("--days", type=float, default=3, help="without --session: sessions touched in the last N days")
     ic.add_argument("--dry-run", action="store_true")
     ic.set_defaults(fn=cmd_import_cli)
+    us = sub.add_parser("usage", help="quota per account: cooling/reset times, estimated use, official % from the CLI")
+    us.add_argument("--html", action="store_true", help="also write a panel page and open it")
+    us.add_argument("--no-open", action="store_true", help="with --html: write the page but do not open it")
+    us.add_argument("--config", action="append", help="also read transcripts from this CLI config folder (repeatable)")
+    us.set_defaults(fn=cmd_usage)
+    w = sub.add_parser("watch", help="record official CLI rate limits from the Claude Code status line")
+    w.add_argument("action", choices=["install", "uninstall", "record"])
+    w.set_defaults(fn=cmd_watch)
     args = p.parse_args(argv)
     args.fn(args)
 

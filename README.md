@@ -54,16 +54,40 @@ Needs Python 3.9+ (the one macOS ships is fine). No dependencies.
 | `claude-move name <account> <label>` | Give an account a short label, e.g. `work`, `personal` |
 | `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them |
 | `claude-move undo [--list] [--backup NAME] [--dry-run]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too |
+| `claude-move usage [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % recorded from the CLI. `--html` opens a panel page |
+| `claude-move watch install` / `uninstall` | Record the official 5-hour/weekly % each time the CLI status line refreshes; keeps your existing status line |
 | `claude-move import-cli --config DIR [--project PATH] [--session ID] [--days N] [--dry-run]` | Copy CLI session transcripts from another config folder (e.g. a second account under `CLAUDE_CONFIG_DIR=~/.claude-work`) into `~/.claude`, so the desktop app can open them. Never overwrites. A project folder name that starts with `-` needs `--project=-Users-me-app` |
 
 `<account>` is a label, or the first few characters of the account id shown by `list`.
 Labels are stored in `~/.config/claude-move/accounts.json`.
 
+## Quota panel
+
+`claude-move usage` shows each account side by side, so you know which one to switch to:
+
+- **Cooling and reset times.** When an account hits its 5-hour or weekly limit, Claude Code writes the
+  official limit message, with the reset time, into the transcript. The panel reads those, so you see
+  "weekly limit used up, back at 10-24 10:00" and when each weekly window resets.
+- **Use per account.** Replies in `~/.claude/projects` are summed for the last 5 hours and the current week,
+  priced at API list prices. This is only for comparing accounts; it is not your bill and not a percentage
+  of your plan. Desktop replies are credited to whoever was signed into the desktop app at that moment
+  (the app's own log names the account it is using); CLI replies go to the account of the config folder
+  you pass with `--config`.
+- **Official percentages, from the CLI.** Claude Code hands its status line the official 5-hour and weekly
+  percentages for Pro and Max plans. `claude-move watch install` adds a small status line recorder that saves
+  them per account (your existing status line keeps showing). The desktop app's Code tab does not run
+  status line scripts, so these only update while you use the CLI.
+
+`claude-move usage --html` also writes a panel page and opens it. It counts Claude Code on this Mac only;
+claude.ai chat and other devices are not included.
+
 ## What it does not do
 
 - It does not move artifacts, projects or anything stored on claude.ai; those stay with the
   account that created them.
-- It does not touch your CLI config directories (`~/.claude*`) or credentials.
+- It never reads or uses credentials. `usage` reads transcripts, account ids and the desktop app's log lines
+  that name the signed-in account; `watch install` edits `settings.json` only when you run it, and
+  `watch uninstall` puts the old status line back.
 - Permissions you granted inside a session ("allow for this session") are not carried over.
 
 ## Tests
@@ -100,6 +124,15 @@ Claude 桌面 App 换了账号登录以后，Code 页左边的会话列表空了
 - `undo [--list] [--backup 名字] [--dry-run]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。
 - `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
-**不做的事：** 不搬 artifact、项目这类存在 claude.ai 上的东西（它们跟着创建它的账号走）；不碰命令行的配置目录和登录凭据；会话里点过的“这次允许”不会带过去。
+- `usage [--html] [--config 目录]`：各账号额度面板，`--html` 打开网页版。
+- `watch install` / `watch uninstall`：装上（或卸掉）状态栏记录器，用命令行版时记下官方百分比。
+
+**额度面板：** `claude-move usage` 把几个号放在一起看，告诉你该换到哪个：
+- 冷却和恢复时间：撞到 5 小时或每周上限时，Claude Code 会把官方提示和恢复时间写进会话记录，面板读的就是它，所以能看到“每周额度用完，10-24 10:00 恢复”，以及每周几点重置。
+- 用量：把 `~/.claude/projects` 里的回复按最近 5 小时和本周加起来，按 API 价折算，只用来比较几个号谁用得多，不是账单，也不是套餐百分比。桌面 App 的回复算给当时登录的那个号（App 自己的日志里记着它在用哪个账号），命令行的回复算给 `--config` 指定的配置目录的账号。
+- 官方百分比：Pro 和 Max 用户的 Claude Code 会把官方的 5 小时、每周百分比交给状态栏。`claude-move watch install` 装一个小记录器，按账号存下来，你原来的状态栏照常显示。桌面 App 的 Code 页不运行状态栏脚本，所以只有用命令行版时才会更新。
+只算这台 Mac 上的 Claude Code，网页聊天和别的设备上的用量算不进来。
+
+**不做的事：** 不搬 artifact、项目这类存在 claude.ai 上的东西（它们跟着创建它的账号走）；从不读、不用登录凭据（`usage` 只读会话记录、账号 id 和桌面 App 日志里写着当前账号的那几行；`watch install` 只在你运行时改 `settings.json`，`watch uninstall` 会把原来的状态栏放回去）；会话里点过的“这次允许”不会带过去。
 
 中文提示会在系统语言是中文时自动出现，也可以用 `CLAUDE_MOVE_LANG=zh` 指定。
