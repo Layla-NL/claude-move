@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""claude-move — move the Claude desktop app's Code session list to another account.
+
+When you sign the Claude desktop app into a different account, the Code tab's session list
+looks empty: the list is stored per account, under
+  ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json
+while the transcripts themselves live in ~/.claude/projects and are not tied to any account.
+This tool copies those list entries from one account to another. It never deletes anything,
+and it backs up the target account's list before it writes.
+
+Unofficial; not affiliated with or endorsed by Anthropic. It relies on the desktop app's
+on-disk layout, which can change in any release.
+
+Usage:
+  claude-move list
+  claude-move sessions <account>
+  claude-move name <account> <label>
+  claude-move to <target> [--from <source>] [--days N] [--all] [--dry-run]
+<account> is a label you gave with `name`, or the first characters of the account id.
+"""
+import argparse
+import json
+import locale
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+__version__ = "0.1.0"
+
+HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
+ROOT = Path(os.environ.get("CLAUDE_MOVE_ROOT", str(HOME / "Library/Application Support/Claude/claude-code-sessions")))
+BACKUPS = Path(os.environ.get("CLAUDE_MOVE_BACKUPS", str(ROOT.parent / "claude-code-sessions-backups")))
+NAMES = Path(os.environ.get("CLAUDE_MOVE_NAMES", str(HOME / ".config/claude-move/accounts.json")))
+
+
+def _zh():
+    lang = os.environ.get("CLAUDE_MOVE_LANG") or os.environ.get("LC_ALL") or os.environ.get("LANG") or ""
+    if not lang:
+        try:
+            lang = locale.getlocale()[0] or ""
+        except ValueError:
+            lang = ""
+    return lang.lower().startswith("zh")
+
+
+ZH = _zh()
+T = {
+    "no_root": ("Session folder not found: {p}", "没找到会话目录：{p}"),
+    "header": ("{a:10} {n:10} {l:>5} {r:>8}  {t}", "{a:10} {n:10} {l:>5} {r:>8}  {t}"),
+    "cols": (("account", "label", "live", "archived", "last used"), ("账号", "名字", "在用", "归档", "最近一次")),
+    "newest": ("  <- most recent", "  ← 最近用的"),
+    "never": ("never", "从没用过"),
+    "empty": ("({n} empty folder(s) not shown: a newly signed-in account starts empty and can still be a target)",
+              "（另有 {n} 个空目录没列出来：新账号刚登录时就是空的，照样可以当目标）"),
+    "name_hint": ("Give an account a label: claude-move name <id-prefix> <label>",
+                  "起名字：claude-move name <账号id前几位> <名字>"),
+    "not_found": ("No account matches \"{t}\". Run `claude-move list` first.", "找不到账号“{t}”。先跑 claude-move list 看一下。"),
+    "many_orgs": ("Note: \"{t}\" has {n} org folders; using the one with the most sessions: {o}",
+                  "提示：“{t}”下有 {n} 个组织目录，用会话最多的那个：{o}"),
+    "untitled": ("(untitled)", "(无标题)"),
+    "count": ("{n} live session(s).", "共 {n} 个在用的会话。"),
+    "named": ("{a} is now called {n}", "{a} 现在叫 {n}"),
+    "same": ("Source and target are the same account.", "来源和目标是同一个账号。"),
+    "plan": ("From {s} to {d}: {n} session(s){w}", "从 {s} 搬到 {d}：{n} 个会话{w}"),
+    "window": (" (used in the last {d} day(s), not archived)", "（最近 {d} 天用过、没归档的）"),
+    "skip": ("  skip (newer on target): {t}", "  跳过（目标那边更新）：{t}"),
+    "add": ("  add: {t}  [{w}]", "  新增：{t}  [{w}]"),
+    "over": ("  overwrite: {t}  [{w}]", "  覆盖：{t}  [{w}]"),
+    "dry": ("Dry run; nothing changed.", "演练模式，什么都没改。"),
+    "nothing": ("Nothing to move.", "没有要搬的。"),
+    "running": ("Quit the Claude desktop app completely first (Claude menu -> Quit), then run this again.",
+                "请先完全退出桌面 App（菜单 Claude → 退出），再运行。"),
+    "backed": ("Target's previous list backed up to: {p}", "目标账号原来的列表已备份到：{p}"),
+    "done": ("Moved {n}. Reopen the desktop app. Transcripts in ~/.claude/projects were never touched.",
+             "搬好了 {n} 个。现在重新打开桌面 App。会话的完整记录本来就在 ~/.claude/projects，不用动。"),
+}
+
+
+def t(key, **kw):
+    s = T[key][1 if ZH else 0]
+    return s.format(**kw) if kw else s
+
+
+def names():
+    try:
+        return json.loads(NAMES.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_names(d):
+    NAMES.parent.mkdir(parents=True, exist_ok=True)
+    NAMES.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+
+
+def load(p):
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def accounts():
+    out = []
+    if not ROOT.is_dir():
+        return out
+    for acct in sorted(ROOT.iterdir()):
+        if not acct.is_dir():
+            continue
+        for org in sorted(acct.iterdir()):
+            if not org.is_dir():
+                continue
+            sess = []
+            for f in org.glob("local_*.json"):
+                d = load(f)
+                if isinstance(d, dict) and d.get("sessionId"):
+                    sess.append((f, d))
+            last = max((d.get("lastActivityAt") or 0 for _, d in sess), default=0)
+            out.append({"acct": acct.name, "org": org.name, "dir": org, "sessions": sess, "last": last})
+    return out
+
+
+def label(a):
+    return names().get(a["acct"], "")
+
+
+def show(a):
+    return label(a) or a["acct"][:8]
+
+
+def pick(token, accts):
+    token = token.strip()
+    nm = names()
+    hits = [a for a in accts if nm.get(a["acct"]) == token] or [a for a in accts if a["acct"].startswith(token)]
+    if not hits:
+        sys.exit(t("not_found", t=token))
+    if len(hits) > 1:
+        hits = sorted(hits, key=lambda a: len(a["sessions"]), reverse=True)
+        print(t("many_orgs", t=token, n=len(hits), o=hits[0]["org"]))
+    return hits[0]
+
+
+def when(ms):
+    return time.strftime("%m-%d %H:%M", time.localtime(ms / 1000)) if ms else t("never")
+
+
+def active(a, days, include_all):
+    cutoff = (time.time() - days * 86400) * 1000
+    return [(f, d) for f, d in a["sessions"]
+            if not d.get("isArchived") and (include_all or (d.get("lastActivityAt") or 0) >= cutoff)]
+
+
+def app_running():
+    if os.environ.get("CLAUDE_MOVE_SKIP_APP_CHECK") == "1":
+        return False
+    try:
+        out = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    return any(line.endswith("/Claude.app/Contents/MacOS/Claude") for line in out.splitlines())
+
+
+def cmd_list(_):
+    accts = accounts()
+    if not accts:
+        sys.exit(t("no_root", p=ROOT))
+    newest = max(accts, key=lambda a: a["last"])
+    c = T["cols"][1 if ZH else 0]
+    print(t("header", a=c[0], n=c[1], l=c[2], r=c[3], t=c[4]))
+    empty = [a for a in accts if not a["sessions"]]
+    for a in sorted((a for a in accts if a["sessions"]), key=lambda a: a["last"], reverse=True):
+        live = sum(1 for _, d in a["sessions"] if not d.get("isArchived"))
+        mark = t("newest") if a is newest else ""
+        print(f"{a['acct'][:8]:10} {label(a) or '-':10} {live:>5} {len(a['sessions']) - live:>8}  {when(a['last'])}{mark}")
+    if empty:
+        print(t("empty", n=len(empty)))
+    print("\n" + t("name_hint"))
+
+
+def cmd_sessions(args):
+    a = pick(args.account, accounts())
+    rows = sorted(((d.get("lastActivityAt") or 0, d) for _, d in a["sessions"] if not d.get("isArchived")),
+                  key=lambda x: x[0], reverse=True)
+    for ts, d in rows:
+        print(f"{when(ts)}  {d.get('title') or t('untitled')}  [{d['sessionId']}]")
+    print(t("count", n=len(rows)))
+
+
+def cmd_name(args):
+    a = pick(args.account, accounts())
+    nm = names()
+    nm[a["acct"]] = args.label
+    save_names(nm)
+    print(t("named", a=a["acct"][:8], n=args.label))
+
+
+def cmd_to(args):
+    accts = accounts()
+    if not accts:
+        sys.exit(t("no_root", p=ROOT))
+    dst = pick(args.target, accts)
+    if args.source:
+        src = pick(args.source, accts)
+    else:
+        others = [a for a in accts if a["dir"] != dst["dir"]]
+        if not others:
+            sys.exit(t("same"))
+        src = max(others, key=lambda a: a["last"])
+    if src["dir"] == dst["dir"]:
+        sys.exit(t("same"))
+    todo = active(src, args.days, args.all)
+    print(t("plan", s=show(src), d=show(dst), n=len(todo), w="" if args.all else t("window", d=f"{args.days:g}")))
+    plan = []
+    for f, d in sorted(todo, key=lambda x: x[1].get("lastActivityAt") or 0, reverse=True):
+        target = dst["dir"] / f.name
+        old = load(target) if target.exists() else None
+        title = d.get("title") or t("untitled")
+        if isinstance(old, dict) and (old.get("lastActivityAt") or 0) > (d.get("lastActivityAt") or 0) and not old.get("isArchived"):
+            print(t("skip", t=title))
+            continue
+        plan.append((f, target))
+        print(t("over" if old else "add", t=title, w=when(d.get("lastActivityAt"))))
+    if args.dry_run:
+        print(t("dry"))
+        return
+    if not plan:
+        print(t("nothing"))
+        return
+    if app_running():
+        sys.exit(t("running"))
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    bk = BACKUPS / f"{time.strftime('%Y%m%d-%H%M%S')}-{dst['acct'][:8]}"
+    shutil.copytree(dst["dir"], bk)
+    print(t("backed", p=bk))
+    for f, target in plan:
+        shutil.copy2(f, target)
+    print(t("done", n=len(plan)))
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="claude-move",
+                                description="Move the Claude desktop app's Code session list between accounts (copy only).")
+    p.add_argument("--version", action="version", version=f"claude-move {__version__}")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list", help="accounts on this Mac and their session counts").set_defaults(fn=cmd_list)
+    s = sub.add_parser("sessions", help="live sessions of one account")
+    s.add_argument("account")
+    s.set_defaults(fn=cmd_sessions)
+    n = sub.add_parser("name", help="give an account a short label")
+    n.add_argument("account")
+    n.add_argument("label")
+    n.set_defaults(fn=cmd_name)
+    to = sub.add_parser("to", help="copy recent live sessions into the target account")
+    to.add_argument("target")
+    to.add_argument("--from", dest="source", help="source account (default: the most recently used one)")
+    to.add_argument("--days", type=float, default=3, help="only sessions used in the last N days (default 3)")
+    to.add_argument("--all", action="store_true", help="every live session, regardless of age")
+    to.add_argument("--dry-run", action="store_true", help="show what would be copied, change nothing")
+    to.set_defaults(fn=cmd_to)
+    args = p.parse_args(argv)
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
