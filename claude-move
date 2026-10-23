@@ -147,6 +147,11 @@ T = {
     "p_refresh": ("Refresh official %", "刷新官方百分比"),
     "p_copy": ("Copy CLI command", "复制命令行启动命令"),
     "p_copied": ("Copied", "已复制"),
+    "p_term": ("Open in Terminal", "打开终端"),
+    "p_term_done": ("Opened", "已打开"),
+    "t_open": ("Opened a Terminal window running Claude Code as {a} ({c})", "已打开终端窗口，用 {a} 运行 Claude Code（{c}）"),
+    "t_none": ("No CLI login for \"{t}\". Sign it in once: CLAUDE_CONFIG_DIR=~/.claude-<name> claude, then /login.",
+               "“{t}”没有命令行登录。先登录一次：CLAUDE_CONFIG_DIR=~/.claude-<名字> claude，再输入 /login。"),
     "p_working": ("Working…", "处理中……"),
     "p_confirm": ("Quit the desktop app now and move the sessions to {a}?", "现在退出桌面 App，把会话搬到 {a}？"),
     "p_busy": ("Already running.", "正在处理，请稍等。"),
@@ -732,10 +737,43 @@ def cli_command(cfg):
     return f"CLAUDE_CONFIG_DIR={shown} claude"
 
 
+def cli_dir(token, extra=()):
+    """The signed-in CLI config folder for an account, by label or id prefix."""
+    nm = names()
+    found = [(cli_account(c), c) for c in cli_configs(extra)]
+    hits = [c for a, c in found if nm.get(a) == token] or [c for a, c in found if a.startswith(token)]
+    return hits[0] if token and hits else None
+
+
+def open_terminal(cfg):
+    """A new Terminal window running `claude` with this config folder, so the CLI uses that folder's own login.
+    It writes a small .command file and lets macOS open it: no Automation permission, no credentials touched."""
+    from shlex import quote
+    exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
+    env = "unset CLAUDE_CONFIG_DIR\n" if cfg == HOME / ".claude" else f"export CLAUDE_CONFIG_DIR={quote(str(cfg))}\n"
+    script = CONF / "term" / (cfg.name.lstrip(".") + ".command")
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(f"#!/bin/sh\ncd ~ || exit 1\n{env}exec {quote(exe)}\n")
+    script.chmod(0o700)
+    cmd = os.environ.get("CLAUDE_MOVE_TERM_CMD")
+    subprocess.run(cmd + " " + quote(str(script)), shell=True) if cmd else subprocess.run(["open", str(script)], check=False)
+    return script
+
+
+def cmd_term(args):
+    cfg = cli_dir(args.account.strip(), args.config or ())
+    if not cfg:
+        sys.exit(t("t_none", t=args.account))
+    acct = cli_account(cfg)
+    open_terminal(cfg)
+    print(t("t_open", a=names().get(acct, acct[:8]), c=cli_command(cfg)))
+
+
 def cli_configs(extra=()):
-    """CLI config folders that have been signed in: ~/.claude, ~/.claude-*, and any passed with --config."""
-    found = [HOME / ".claude"] + sorted(p for p in HOME.glob(".claude-*") if p.is_dir())
-    found += [Path(os.path.expanduser(c)) for c in extra]
+    """CLI config folders that have been signed in: ~/.claude-*, any passed with --config, then ~/.claude. A folder
+    made for one account comes before ~/.claude, whose cached profile can outlive its login."""
+    found = sorted(p for p in HOME.glob(".claude-*") if p.is_dir())
+    found += [Path(os.path.expanduser(c)) for c in extra] + [HOME / ".claude"]
     out = []
     for c in found:
         if c not in out and cli_account(c):
@@ -998,7 +1036,8 @@ def render_html(rep, live=None):
         foot = f'<p class="foot">{escape(t("u_reset", w=clock(r["week_reset"])))}</p>' if r["week_reset"] else ""
         plan = f' <small class="plan">{escape(r["plan"])}</small>' if r["plan"] else ""
         if live and r["cli"]:
-            foot += (f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>')
+            foot += (f'<button class="ghost" data-term="{escape(r["acct"])}">{escape(t("p_term"))}</button> '
+                     f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>')
         cards.append(f'<section class="card {state}"><header><h2>{escape(r["name"])}{plan}</h2>'
                      f'<span class="badge">{escape(badge)}</span></header>{cool}{nums}{meters}'
                      f'<div class="days">{bars}</div>{foot}</section>')
@@ -1055,7 +1094,7 @@ def live_bar(live):
 def live_script(live):
     if not live:
         return ""
-    texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm")}
+    texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm", "p_term_done")}
     return f"""<script>
 const T = {json.dumps(texts, ensure_ascii=False)}, KEY = {json.dumps(live["token"])};
 const fmt = (s, o) => s.replace(/\\{{(\\w+)\\}}/g, (_, k) => o[k] ?? "");
@@ -1083,6 +1122,10 @@ document.getElementById("refresh").onclick = async () => {{
 }};
 document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () =>
   navigator.clipboard.writeText(b.dataset.copy).then(() => {{ b.textContent = T.p_copied; }}));
+document.querySelectorAll("[data-term]").forEach(b => b.onclick = async () => {{
+  const r = await api("/terminal", {{acct: b.dataset.term}});
+  if (r.ok) b.textContent = T.p_term_done; else {{ const log = document.getElementById("log"); log.hidden = false; log.textContent = r.log; }}
+}}));
 poll(); setInterval(poll, 3000);
 </script>"""
 
@@ -1246,6 +1289,13 @@ def cmd_panel(args):
                 finally:
                     busy["on"] = False
                 return self.send(200, json.dumps({"ok": ok, "log": log}, ensure_ascii=False))
+            if path == "/terminal":  # only an account's own signed-in config folder, only to run `claude`
+                acct = str(body.get("acct") or "")
+                cfg = next((c for c in cli_configs(args.config or ()) if acct and cli_account(c) == acct), None)
+                if not cfg:
+                    return self.send(404, json.dumps({"ok": False, "log": t("t_none", t=acct[:8])}, ensure_ascii=False))
+                open_terminal(cfg)
+                return self.send(200, json.dumps({"ok": True, "log": ""}))
             if path == "/refresh":
                 import contextlib
                 import io
@@ -1577,6 +1627,10 @@ def main(argv=None):
     ap.add_argument("--no-dock", action="store_true", help="do not add it to the Dock")
     ap.add_argument("--icon", help="use this image (PNG/JPEG, ideally 1024x1024) as the app icon")
     ap.set_defaults(fn=cmd_app)
+    tm = sub.add_parser("term", help="open a Terminal window running Claude Code with that account's CLI login")
+    tm.add_argument("account", help="label or id prefix of an account signed in under ~/.claude or ~/.claude-*")
+    tm.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
+    tm.set_defaults(fn=cmd_term)
     w = sub.add_parser("watch", help="record official CLI rate limits from the Claude Code status line")
     w.add_argument("action", choices=["install", "uninstall", "record"])
     w.set_defaults(fn=cmd_watch)

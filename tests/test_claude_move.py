@@ -286,6 +286,23 @@ class Usage(unittest.TestCase):
         self.assertIn("week · Opus", (self.home / ".config/claude-move/usage.html").read_text())
 
 
+    def test_term_runs_claude_with_that_login(self):
+        c = self.home / ".claude-second"
+        c.mkdir()
+        (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
+        (self.home / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))  # stale profile
+        self.run_tool("name", "bbbb", "second")
+        r = self.run_tool("term", "second", CLAUDE_MOVE_TERM_CMD="true", CLAUDE_MOVE_CLAUDE="/opt/x/claude")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("CLAUDE_CONFIG_DIR=~/.claude-second claude", r.stdout)
+        script = self.home / ".config/claude-move/term/claude-second.command"
+        self.assertEqual(script.read_text().splitlines()[2:], [f"export CLAUDE_CONFIG_DIR={c}", "exec /opt/x/claude"])
+        self.assertTrue(os.access(script, os.X_OK))
+        r = self.run_tool("term", "aaaa", CLAUDE_MOVE_TERM_CMD="true")  # has sessions, but no CLI login
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("No CLI login", r.stderr)
+
+
 class Plan(unittest.TestCase):
     def test_plan_names(self):
         import importlib.machinery, importlib.util
@@ -307,7 +324,8 @@ class Panel(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
         env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
                    CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1",
-                   CLAUDE_MOVE_QUIT_CMD=f"touch {self.home}/quit", CLAUDE_MOVE_OPEN_CMD=f"touch {self.home}/open")
+                   CLAUDE_MOVE_QUIT_CMD=f"touch {self.home}/quit", CLAUDE_MOVE_OPEN_CMD=f"touch {self.home}/open",
+                   CLAUDE_MOVE_TERM_CMD=f"touch {self.home}/term; true")
         self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open"], stdout=subprocess.PIPE, text=True, env=env)
         self.addCleanup(lambda: (self.proc.kill(), self.proc.wait(), self.proc.stdout.close()))
         line = self.proc.stdout.readline()
@@ -350,6 +368,21 @@ class Panel(unittest.TestCase):
         self.assertTrue(r["ok"], r["log"])
         self.assertTrue((self.home / "quit").exists() and (self.home / "open").exists())
         self.assertTrue((self.root / c / "org" / "local_1.json").exists())
+
+    def test_panel_terminal_only_for_signed_in_cli(self):
+        c = self.home / ".claude-second"
+        c.mkdir()
+        (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
+        self.start()
+        self.assertIn(f'data-term="{self.b}"', self.call(f"/?t={self.token}", token=False)[1])
+        self.assertEqual(self.call("/terminal", {"acct": self.a})[0], 404)  # no CLI login for this one
+        self.assertEqual(self.call("/terminal", {"acct": ""})[0], 404)
+        self.assertFalse((self.home / "term").exists())
+        self.assertEqual(self.call("/terminal", {"acct": self.b}, token=False)[0], 403)
+        code, body = self.call("/terminal", {"acct": self.b})
+        self.assertEqual(code, 200, body)
+        self.assertTrue((self.home / "term").exists())
+        self.assertIn(f"CLAUDE_CONFIG_DIR={c}", (self.home / ".config/claude-move/term/claude-second.command").read_text())
 
     def test_usage_text_fallback(self):
         import importlib.machinery, importlib.util
@@ -404,6 +437,6 @@ class PanelLifecycle(unittest.TestCase):
 
 class Help(unittest.TestCase):
     def test_every_help_renders(self):
-        for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["watch"]):
+        for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["term"], ["watch"]):
             r = subprocess.run([sys.executable, str(TOOL), *args, "--help"], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, (args, r.stderr[-300:]))
