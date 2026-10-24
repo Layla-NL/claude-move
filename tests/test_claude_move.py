@@ -600,7 +600,7 @@ class Panel(unittest.TestCase):
         self.start()
         page = self.call(f"/?t={self.token}", token=False)[1]
         js = self.home / "page.js"
-        js.write_text(re.findall(r"<script>(.*?)</script>", page, re.S)[-1])
+        js.write_text(re.findall(r"<script>(.*?)</script>", page, re.S)[-1], encoding="utf-8")
         r = subprocess.run(["node", "--check", str(js)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
