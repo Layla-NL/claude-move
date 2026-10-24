@@ -1970,7 +1970,7 @@ h1 .info{color:var(--dim);display:inline-flex}
   box-shadow:0 10px 22px -10px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.18) inset}
 .go b{font:600 14px var(--sans)}
 pre.log{flex-basis:100%;white-space:pre-wrap;font:12px/1.5 var(--mono);background:var(--bg);border-radius:12px;padding:10px 12px;margin:0;max-height:240px;overflow:auto}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(244px,1fr));gap:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(244px,1fr));gap:16px}
 .card{position:relative;background:var(--card);border-radius:28px;box-shadow:var(--lift);overflow:hidden;isolation:isolate;min-width:0}
 .sky{height:186px;position:relative}
 .orb{position:absolute;width:min(224px,84%);height:auto;aspect-ratio:1/1;left:50%;top:186px;transform:translate(-50%,-50%);z-index:0}
