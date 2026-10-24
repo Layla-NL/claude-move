@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.1
+- A new default icon in the panel's look: a ball drawn by the panel's own shader, frosted glass over its lower half, and the move button.
+
 ## 0.6.0
 - The panel is redesigned. Each account is a card with a ball drawn by a small WebGL shader, its color following the account's tightest official limit along one ramp (blue, teal, green, yellow, amber at 75%, red at 90 and 95%, deep red when used up), with frosted glass over its lower half; no official % means silver. Tabs on the card switch between limits and the color travels along the ramp. Buttons are icons with a tooltip; the tools sit in a dock under the cards. Without WebGL, or with reduced motion, the ball is a still gradient.
 - Total use: a heatmap of every account's use at API list prices over 26 weeks, and by hour of the week; click a day for its projects (a worktree counts as its repository). Daily figures stay in the cache after Claude Code deletes old transcripts (the cache keeps 26 weeks and is rebuilt once).
