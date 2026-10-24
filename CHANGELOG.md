@@ -8,6 +8,7 @@
 - Search desktop sessions of every account by title, and copy a found one into the account the desktop app is signed into.
 - Keys in the panel: 1–9 open a card's terminal, / searches, R refreshes, Esc closes.
 - `bar install` (macOS): a menu bar ball through SwiftBar or xbar, colored like the panel, with every account in its menu; it reads only the official numbers already saved.
+- A weekly summary notification, the first time each week the panel or `usage` reads your use: last week's total at API prices, the account that used most, the busiest day. It follows `notify on|off`.
 - `panel --demo`: the panel with sample accounts, for screenshots or a first look; it reads nothing on this computer and its buttons do nothing.
 - An accent setting for how much a second color drifts through each ball, kept in `~/.config/claude-move/look.json`.
 

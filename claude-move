@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 __version__ = "0.6.0"
@@ -367,6 +367,7 @@ T = {
     "bar_removed": ("Removed {p}.", "已删除 {p}。"),
     "bar_none": ("No menu bar plugin found.", "没找到菜单栏插件。"),
     "bar_mac": ("The menu bar plugin is for macOS (SwiftBar or xbar).", "菜单栏插件只支持 macOS（SwiftBar 或 xbar）。"),
+    "n_week": ("Last week: {d} at API prices; most on {a}, busiest on {w}.", "上周按 API 价用了 {d}；用得最多的是 {a}，最忙的是{w}。"),
     "pp_next": ("Next 7 days", "接下来 7 天"),
     "pp_next_tip": ("When each official limit resets; red runs until a cooling account is back", "每项官方额度几点重置；红条是冷却到几点"),
     "pp_ticks": ("now,1h,5h,1d,3d,7d", "现在,1小时,5小时,1天,3天,7天"),
@@ -1546,6 +1547,7 @@ def cmd_usage(args):
         print()
     print(t("u_scan"), file=sys.stderr)
     rep = usage_report(args.config or ())
+    maybe_week_summary(rep)
     print(t("u_title"))
     for r in rep["rows"]:
         print(f"{r['name']:10} {r['plan'] or '-':8} {row_text(r, rep['now'])}")
@@ -2533,6 +2535,7 @@ def cmd_panel(args):
                 return self.demo(path)
             if path == "/":
                 rep_ = usage_report(args.config or ())
+                maybe_week_summary(rep_)
                 return self.send(200, render_html(rep_, live={"token": token}), "text/html")
             if path == "/state":
                 accts = accounts()
@@ -3169,6 +3172,40 @@ def check_levels(acct, rows):
     if changed:
         state[acct] = mine
         save_json(NOTIFIED, state)
+
+
+def week_summary(rep):
+    """Last week (Monday to Sunday) from the heatmap: (year-week, text), or None when there was no use."""
+    h = rep.get("heat")
+    if not h:
+        return None
+    start = datetime.strptime(h["start"], "%Y-%m-%d").date()
+    today = datetime.fromtimestamp(rep["now"]).date()
+    monday = today - timedelta(days=today.weekday() + 7)
+    first = (monday - start).days
+    if first < 0:
+        return None
+    acct = {k: sum(v[first:first + 7]) for k, v in h["cal"].items()}
+    days = [sum(v[first + i] for v in h["cal"].values()) for i in range(7)]
+    if sum(days) < 1:
+        return None
+    name = {a["k"]: a["name"] for a in h["accts"]}
+    week = "{}-W{:02d}".format(*monday.isocalendar()[:2])
+    return week, t("n_week", d=f"${sum(days):,.0f}", a=name.get(max(acct, key=acct.get), "?"),
+                   w=t("pp_wdfmt", d=t("pp_wd").split(",")[days.index(max(days))]))
+
+
+def maybe_week_summary(rep):
+    """Once a week, the first time use is read (the panel or `usage`), notify last week's summary."""
+    if not notify_conf()["on"]:
+        return
+    s = week_summary(rep)
+    state = load(NOTIFIED) or {}
+    if not s or state.get("_week") == s[0]:
+        return
+    state["_week"] = s[0]
+    save_json(NOTIFIED, state)
+    notify(t("n_title"), s[1])
 
 
 def cmd_notify(args):

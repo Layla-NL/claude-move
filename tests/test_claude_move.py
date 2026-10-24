@@ -234,7 +234,8 @@ class Usage(unittest.TestCase):
     def run_tool(self, *args, stdin=None, **env_extra):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
         env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
-                   CLAUDE_MOVE_LANG="en", **env_extra)
+                   CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_NOTIFY_CMD=NOOP)
+        env.update(env_extra)
         return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, encoding="utf-8", env=env,
                               input=stdin)
 
@@ -301,6 +302,21 @@ class Usage(unittest.TestCase):
             self.assertTrue(os.access(d / "claude-move.1m.sh", os.X_OK))
             self.run_tool("bar", "uninstall", "--dir", str(d))
             self.assertFalse((d / "claude-move.1m.sh").exists())
+
+    def test_week_summary_once(self):
+        from datetime import date, datetime, timedelta
+        monday = date.today() - timedelta(days=date.today().weekday() + 7)
+        wed = datetime(monday.year, monday.month, monday.day, 12) + timedelta(days=2)
+        f = self.desk / "projects" / "-q" / "s7.jsonl"
+        f.parent.mkdir(parents=True)
+        f.write_text(json.dumps(reply("s7", wed.timestamp(), "m7", out=100000, entry="cli")) + "\n")
+        out = self.home / "notes"
+        for _ in range(2):
+            self.run_tool("usage", CLAUDE_MOVE_NOTIFY_CMD=append_cmd(out))
+        sent = [ln for ln in out.read_text(encoding="utf-8").splitlines() if ln.startswith("Last week")]
+        self.assertEqual(len(sent), 1)
+        self.assertIn("$2", sent[0])
+        self.assertIn("busiest on Wed", sent[0])
 
     def test_watch_records_official_limits_and_restores_old_status_line(self):
         cfg = self.home / "cli"

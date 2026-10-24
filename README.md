@@ -87,7 +87,7 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 | `claude-move bar install` | macOS: a ball in the menu bar through [SwiftBar](https://swiftbar.app) or xbar, colored like the panel, for the account the desktop app is signed into; its menu lists every account and opens the panel. It reads only the official numbers already saved, so it costs nothing to run every minute. `bar uninstall` removes it |
 | `claude-move term <account> [--rc]` | Open a Terminal window running Claude Code as that account, with its own CLI login folder (`CLAUDE_CONFIG_DIR=~/.claude-<name>`), in the project folder that account used last. `--rc` starts it as a Remote Control session named after the account, so the Claude phone app signed into the same account can join |
 | `claude-move run <account> [--rc] [--resume ID] [-- claude args]` | Run Claude Code as that account; when the session hits a usage limit, move it to the CLI login with the most left and resume it there (see below) |
-| `claude-move notify on\|off\|status\|test [--levels 75,90,95]` | macOS notifications when an account's official % passes each level, once per reset window (on by default) |
+| `claude-move notify on\|off\|status\|test [--levels 75,90,95]` | macOS notifications when an account's official % passes each level, once per reset window (on by default). Once a week, the first time the panel or `usage` reads your use, a summary of last week: total at API prices, the account that used most, the busiest day |
 | `claude-move doctor [--refresh]` | Check labels, CLI logins (and whether `/usage` answers in each), accounts that show up in two folders, desktop accounts without a CLI login, the status line recorder and the app's signature |
 | `claude-move watch install` / `uninstall` | Record the official 5-hour/weekly % each time the CLI status line refreshes; keeps your existing status line |
 | `claude-move import-cli --config DIR [--project PATH] [--session ID] [--days N] [--dry-run]` | Copy CLI session transcripts from another config folder (e.g. a second account under `CLAUDE_CONFIG_DIR=~/.claude-work`) into `~/.claude`, so the desktop app can open them. Never overwrites. A project folder name that starts with `-` needs `--project=-Users-me-app` |
@@ -276,7 +276,7 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 - `bar install`：macOS 菜单栏上的一颗小球（通过 [SwiftBar](https://swiftbar.app) 或 xbar），颜色和面板一样，显示桌面 App 登录的那个号；点开列出所有号，还能打开面板。只读已经存下的官方数字，每分钟跑一次也不费事。`bar uninstall` 去掉。
 - `term <账号> [--rc]`：弹出一个终端窗口，在这个号最近用过的项目文件夹里，用它的命令行登录目录（`CLAUDE_CONFIG_DIR=~/.claude-<名字>`）运行 Claude Code；`--rc` 以 Remote Control 会话启动、用账号名字命名，手机 App 登录同一个号就能连上。
 - `run <账号> [--rc] [--resume id] [-- claude 的参数]`：用这个号运行 Claude Code，撞到额度上限时把会话搬到剩得最多的号接着干（见下面）。
-- `notify on|off|status|test [--levels 75,90,95]`：某个号的官方百分比过 75/90/95% 时弹系统通知，每个重置周期每档只提醒一次（默认开）。
+- `notify on|off|status|test [--levels 75,90,95]`：某个号的官方百分比过 75/90/95% 时弹系统通知，每个重置周期每档只提醒一次（默认开）。每周第一次打开面板或运行 `usage` 时，还会发一条上周小结：按 API 价总共用了多少、哪个号用得最多、哪天最忙。
 - `doctor [--refresh]`：自检：名字、各命令行登录（以及 `/usage` 能不能用）、同一个号出现在两个目录、有桌面会话却没有命令行登录的号、状态栏记录器、小 App 的签名。
 - `watch install` / `watch uninstall`：装上（或卸掉）状态栏记录器，用命令行版时记下官方百分比。
 
