@@ -594,6 +594,13 @@ class Panel(unittest.TestCase):
             self.assertEqual(self.call("/api/look", {"accent": bad})[0], 400)
         page = self.call(f"/?t={self.token}", token=False)[1]
         self.assertIn('id="accent" min="0" max="200" value="150"', page)
+        self.assertEqual(self.call("/api/look", {"theme": "dark", "lang": "zh"})[0], 200)
+        for bad in ({"theme": "pink"}, {"lang": "fr"}, {}):
+            self.assertEqual(self.call("/api/look", bad)[0], 400)
+        page = self.call(f"/?t={self.token}", token=False)[1]
+        self.assertIn('<html lang="zh" data-theme="dark">', page)
+        self.assertIn('data-to="en"', page)
+        self.assertEqual(json.loads((self.home / ".config/claude-move/look.json").read_text(encoding="utf-8"))["accent"], 1.5)
 
     def test_panel_script_parses(self):
         import re

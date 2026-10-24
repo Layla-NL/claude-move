@@ -238,22 +238,22 @@ T = {
                   "Claude Move.app：签名坏了，macOS 可能说它“已损坏”：claude-move app install"),
     "d_fine": ("No problems found.", "没发现问题。"),
     "d_count": ("{n} thing(s) to look at.", "有 {n} 处要看一下。"),
-    "pt_move": ("Move sessions: pick and preview", "搬会话：挑着搬、先预览"),
+    "pt_move": ("Move sessions: choose source, target and range, preview, then move", "迁移会话：选择来源、目标和范围，预览后执行"),
     "pt_from": ("From", "从"),
     "pt_to": ("to", "搬到"),
     "pt_r3": ("used in the last 3 days", "最近 3 天用过的"),
     "pt_r7": ("used in the last 7 days", "最近 7 天用过的"),
     "pt_rall": ("all live sessions", "全部在用的"),
-    "pt_rpick": ("only the ones ticked below", "只搬下面勾选的"),
+    "pt_rpick": ("only the ones ticked below", "仅下方勾选的"),
     "pt_preview": ("Preview", "预览"),
-    "pt_do_move": ("Move", "搬"),
+    "pt_do_move": ("Move", "迁移"),
     "pt_move_confirm": ("The desktop app has to be closed while moving: quit it now, move, and reopen it?",
                         "搬的时候桌面 App 要关着：现在退出、搬完再重新打开？"),
-    "pt_undo": ("Undo a move", "撤回搬家"),
-    "pt_undo_btn": ("Undo this", "撤回这次"),
+    "pt_undo": ("Undo a move", "撤销迁移"),
+    "pt_undo_btn": ("Undo this", "撤销这次"),
     "pt_undo_confirm": ("Put {a}'s list back as it was before this move? An open desktop app is quit and reopened.",
                         "把 {a} 的列表恢复成这次搬之前的样子？桌面 App 开着的话会先退出、弄完再打开。"),
-    "pt_undone": ("undone", "已撤回"),
+    "pt_undone": ("undone", "已撤销"),
     "pt_sessions": ("Sessions by account", "各账号的会话"),
     "pt_archived": ("archived", "已归档"),
     "pt_import": ("Open CLI sessions in the desktop app", "命令行会话导入桌面 App"),
@@ -266,7 +266,7 @@ T = {
     "pt_run_switch": ("{w}  {a} -> {b}", "{w}  {a} → {b}"),
     "pt_running": ("running", "运行中"),
     "pt_ended": ("ended", "已结束"),
-    "pt_doctor": ("Check-up", "自检"),
+    "pt_doctor": ("Check-up", "诊断"),
     "pt_doctor_refresh": ("Check again (asks each login's /usage)", "重新检查（会问各登录的 /usage）"),
     "pt_fix": ("Fix", "修复"),
     "pt_notify": ("Notifications", "通知"),
@@ -285,7 +285,7 @@ T = {
     "pt_rec_confirm": ("This edits the statusLine setting in {p} (your current one keeps showing). Go on?",
                        "这会改 {p} 里的 statusLine（原来的状态栏照样显示）。继续？"),
     "pt_login": ("Add CLI login", "加命令行登录"),
-    "pt_login_new": ("Add another account's CLI login", "再加一个号的命令行登录"),
+    "pt_login_new": ("Add another account's CLI login", "添加另一个账号的命令行登录"),
     "pt_login_ask": ("Short name for the new account (letters, digits, dashes; the folder becomes ~/.claude-<name>):",
                      "给新号起个短名字（字母、数字、短横线；登录目录就是 ~/.claude-<名字>）："),
     "pt_login_opened": ("A Terminal window started the official sign-in for {d}. Sign in with {a} in the browser that opens; the panel picks it up by itself.",
@@ -349,14 +349,14 @@ T = {
                       "球的颜色跟着这个号最紧的那项官方额度走；75 / 90 / 95 是发通知的地方"),
     "pp_accent": ("Accent", "点缀"),
     "pp_accent_tip": ("How much a second color drifts through each ball", "球里点缀色的强度：往左更纯，往右更花"),
-    "pp_d_move": ("Pick", "挑着搬"),
-    "pp_d_undo": ("Undo", "撤回"),
+    "pp_d_move": ("Move", "迁移"),
+    "pp_d_undo": ("Undo", "撤销"),
     "pp_d_sess": ("Sessions", "会话"),
     "pp_d_imp": ("Import", "导入"),
-    "pp_d_runs": ("Go on", "续接"),
-    "pp_d_doc": ("Check", "自检"),
+    "pp_d_runs": ("Auto", "续接"),
+    "pp_d_doc": ("Doctor", "诊断"),
     "pp_d_notify": ("Notify", "通知"),
-    "pp_d_login": ("Add login", "加登录"),
+    "pp_d_login": ("Add login", "添加登录"),
     "pp_d_upd": ("Update", "更新"),
     "pp_demo": ("Demo: sample accounts, nothing read from this computer; buttons do nothing.",
                 "演示：示例账号，不读这台电脑上的任何东西；按钮不做事。"),
@@ -368,6 +368,11 @@ T = {
     "bar_none": ("No menu bar plugin found.", "没找到菜单栏插件。"),
     "bar_mac": ("The menu bar plugin is for macOS (SwiftBar or xbar).", "菜单栏插件只支持 macOS（SwiftBar 或 xbar）。"),
     "n_week": ("Last week: {d} at API prices; most on {a}, busiest on {w}.", "上周按 API 价用了 {d}；用得最多的是 {a}，最忙的是{w}。"),
+    "pp_theme_auto": ("Theme: follows the system", "主题：跟随系统"),
+    "pp_theme_light": ("Theme: light", "主题：浅色"),
+    "pp_theme_dark": ("Theme: dark", "主题：深色"),
+    "pp_lang_to": ("中", "EN"),
+    "pp_lang_tip": ("切换到中文", "Switch to English"),
     "pp_next": ("Next 7 days", "接下来 7 天"),
     "pp_next_tip": ("When each official limit resets; red runs until a cooling account is back", "每项官方额度几点重置；红条是冷却到几点"),
     "pp_ticks": ("now,1h,5h,1d,3d,7d", "现在,1小时,5小时,1天,3天,7天"),
@@ -1591,6 +1596,9 @@ ICONS = {  # 24x24 stroked paths for the page's buttons
     "check": '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     "q": '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2-2.4 3.5M12 17h.01"/>',
     "info": '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.5h.01"/>',
+    "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
+    "moon": '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+    "contrast": '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>',
     "search": '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
     "flame": '<path d="M12 21a6.5 6.5 0 0 0 6.5-6.5c0-4-3-6-4-9.5-2 1.5-3 3.5-3 5.5-1-1-1.5-2-1.5-3.5-2.5 2-4.5 4.5-4.5 7.5A6.5 6.5 0 0 0 12 21z"/>',
 }
@@ -1606,9 +1614,19 @@ def tip(text):
 
 
 def look():
+    """The panel's own settings: accent strength, light/dark/system theme, and a language that overrides the system's."""
     d = load(LOOK)
-    a = d.get("accent") if isinstance(d, dict) else None
-    return {"accent": a if isinstance(a, (int, float)) and 0 <= a <= 2 else 1.0}
+    d = d if isinstance(d, dict) else {}
+    a = d.get("accent")
+    return {"accent": a if isinstance(a, (int, float)) and not isinstance(a, bool) and 0 <= a <= 2 else 1.0,
+            "theme": d["theme"] if d.get("theme") in ("light", "dark") else "auto",
+            "lang": d["lang"] if d.get("lang") in ("zh", "en") else ""}
+
+
+def use_lang(lang):
+    global ZH
+    if lang in ("zh", "en"):
+        ZH = lang == "zh"
 
 
 def short_clock(ts, now):
@@ -1711,9 +1729,14 @@ def render_html(rep, live=None):
         f = rep["first_back"]
         advice = (f'<span class="advice" data-tip="{tip(t("u_pick_none", a=f["name"], w=clock(f["cool"]["until"])))}">'
                   f'<span class="dot" data-heat="100"></span>{E(f["name"])} {E(short_clock(f["cool"]["until"], now))}</span>')
+    lk = look()
+    theme_attr = f' data-theme="{lk["theme"]}"' if lk["theme"] != "auto" else ""
     refresh = (f'<label class="search" data-tip="{tip(t("pp_search_tip"))}">{icon("search")}<input type="search" id="q" '
                f'placeholder="{E(t("pp_search"))}" autocomplete="off"></label>'
                f'<button class="ib raised" type="button" id="refresh" data-tip="{tip(t("p_refresh") + chr(10) + t("pp_refresh"))}">{icon("refresh")}</button>'
+               f'<button class="ib raised" type="button" id="theme" data-theme="{lk["theme"]}" data-tip="{tip(t("pp_theme_" + lk["theme"]))}">'
+               f'{icon({"auto": "contrast", "light": "sun", "dark": "moon"}[lk["theme"]])}</button>'
+               f'<button class="ib raised lang" type="button" id="lang" data-to="{"en" if ZH else "zh"}" data-tip="{tip(t("pp_lang_tip"))}">{E(t("pp_lang_to"))}</button>'
                if live else "")
     found = '<section class="panel found" id="found" hidden></section>' if live else ""
     nxt = []
@@ -1756,7 +1779,7 @@ def render_html(rep, live=None):
     blob = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     sprite = ('<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
               + "".join(f'<symbol id="i-{k}" viewBox="0 0 24 24">{v}</symbol>' for k, v in ICONS.items()) + "</svg>")
-    return f"""<!doctype html><html lang="{'zh' if ZH else 'en'}"><head><meta charset="utf-8">
+    return f"""<!doctype html><html lang="{'zh' if ZH else 'en'}"{theme_attr}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Claude Move</title><link rel="icon" id="favicon" href="data:,">
 <style>{PANEL_CSS}{TOOLS_CSS if live else ""}</style></head><body>{sprite}<div id="tip" role="tooltip"></div><main>
 <div class="top"><div><h1>Claude Move <span class="info" data-tip="{tip(t("u_title") + chr(10) + chr(10) + t("u_notes") + (chr(10) + chr(10) + t("pp_keys") if live else ""))}">{icon("info")}</span></h1>
@@ -1781,7 +1804,8 @@ def live_script(live):
     if not live:
         return ""
     texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm",
-                               "p_term_done", "p_step1", "p_step2", "pp_last", "pp_search_none", "pp_bring")}
+                               "p_term_done", "p_step1", "p_step2", "pp_last", "pp_search_none", "pp_bring",
+                               "pp_theme_auto", "pp_theme_light", "pp_theme_dark")}
     return f"""<script>
 const T = {json.dumps(texts, ensure_ascii=False)}, KEY = {json.dumps(live["token"])};
 const fmt = (s, o) => s.replace(/\\{{(\\w+)\\}}/g, (_, k) => o[k] ?? "");
@@ -1830,6 +1854,15 @@ try {{ setPressed("auto", localStorage.getItem("auto") === "1"); }} catch (e) {{
 byId("auto").onclick = () => {{ setPressed("auto", !pressed("auto")); try {{ localStorage.setItem("auto", pressed("auto") ? "1" : "0"); }} catch (e) {{}} }};
 byId("all").onclick = () => setPressed("all", !pressed("all"));
 CM.saveAccent = v => api("/api/look", {{accent: v}});
+const THEMES = {{auto: ["light", "sun"], light: ["dark", "moon"], dark: ["auto", "contrast"]}};
+byId("theme").onclick = () => {{
+  const b = byId("theme"), [next, ic] = THEMES[b.dataset.theme];
+  if (next === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = next;
+  b.dataset.theme = next; b.dataset.tip = T["pp_theme_" + next];
+  b.innerHTML = '<svg class="i" aria-hidden="true"><use href="#i-' + ic + '"/></svg>'; CM.tip(b);
+  api("/api/look", {{theme: next}});
+}};
+byId("lang").onclick = async () => {{ await api("/api/look", {{lang: byId("lang").dataset.to}}); location.reload(); }};
 const syncDock = () => document.querySelectorAll("[data-open]").forEach(b =>
   b.setAttribute("aria-pressed", byId(b.dataset.open).open ? "true" : "false"));
 document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => {{
@@ -1902,13 +1935,8 @@ PANEL_CSS = r"""
   --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI Variable Display","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
-@media (prefers-color-scheme:dark){:root{
-  --bg:#0d0f13; --dot:#1b1f27; --card:#15181e; --raise:#232831; --ink:#eef1f6; --dim:#8a93a4; --hair:rgba(255,255,255,.07);
-  --glass:rgba(21,24,30,.55); --btn:#f1f3f6; --btnink:#0d0f13; --ok:#4cc38a; --hot:#ff6b57;
-  --cell:#1e232c; --heat:#cbd8f0; --tip:#f1f3f6; --tipink:#0d0f13;
-  --lift:0 1px 0 rgba(255,255,255,.05) inset,0 24px 48px -20px rgba(0,0,0,.7);
-  --pill:0 1px 0 rgba(255,255,255,.08) inset,0 4px 12px -4px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06);
-  color-scheme:dark}}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){__DARK__}}
+:root[data-theme="dark"]{__DARK__}
 *{box-sizing:border-box} [hidden]{display:none!important}
 body{margin:0;background:var(--bg) radial-gradient(var(--dot) 1.1px,transparent 1.5px) 0 0/18px 18px;color:var(--ink);font:14px/1.5 var(--sans);padding:28px 16px 48px}
 main{max-width:1120px;margin:0 auto;display:grid;gap:20px}
@@ -1920,7 +1948,7 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .ib{background:none;border:0;border-radius:11px;width:34px;height:34px;display:inline-grid;place-items:center;color:var(--dim);padding:0}
 .ib:hover,.ib[aria-pressed="true"]{background:var(--hair);color:var(--ink)}
 .ib.raised{background:var(--raise);box-shadow:var(--pill);color:var(--ink)}
-.ib.done{color:var(--ok)} .ib.spin svg{animation:spin 1s linear infinite}
+.ib.done{color:var(--ok)} .ib.lang{font:700 12px var(--sans);width:34px} .ib.spin svg{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 #tip{position:fixed;z-index:50;pointer-events:none;background:var(--tip);color:var(--tipink);font-size:12px;line-height:1.45;padding:6px 10px;border-radius:9px;
   max-width:300px;box-shadow:0 8px 20px -8px rgba(0,0,0,.5);opacity:0;transform:translateY(3px);transition:opacity .12s,transform .12s;white-space:pre-line;left:0;top:0}
@@ -2032,6 +2060,15 @@ pre.log{flex-basis:100%;white-space:pre-wrap;font:12px/1.5 var(--mono);backgroun
 @media (max-width:640px){.go{width:100%;justify-content:center}.sp{display:none}.search input{width:100px}}
 @media (prefers-reduced-motion:reduce){#tip{transition:none}.ib.spin svg{animation:none}}
 """
+
+PANEL_DARK = """
+  --bg:#0d0f13; --dot:#1b1f27; --card:#15181e; --raise:#232831; --ink:#eef1f6; --dim:#8a93a4; --hair:rgba(255,255,255,.07);
+  --glass:rgba(21,24,30,.55); --btn:#f1f3f6; --btnink:#0d0f13; --ok:#4cc38a; --hot:#ff6b57;
+  --cell:#1e232c; --heat:#cbd8f0; --tip:#f1f3f6; --tipink:#0d0f13;
+  --lift:0 1px 0 rgba(255,255,255,.05) inset,0 24px 48px -20px rgba(0,0,0,.7);
+  --pill:0 1px 0 rgba(255,255,255,.08) inset,0 4px 12px -4px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06);
+  color-scheme:dark"""
+PANEL_CSS = PANEL_CSS.replace("__DARK__", PANEL_DARK)
 
 PANEL_JS = r"""(() => {
 const D = __DATA__, S = D.T;
@@ -2534,6 +2571,7 @@ def cmd_panel(args):
             if args.demo:
                 return self.demo(path)
             if path == "/":
+                use_lang(look()["lang"])
                 rep_ = usage_report(args.config or ())
                 maybe_week_summary(rep_)
                 return self.send(200, render_html(rep_, live={"token": token}), "text/html")
@@ -3753,10 +3791,25 @@ def panel_api(method, path, q, body, extra=()):
             lines.append(t("imp_add" if added else "imp_skip", i=sid, w=w, t=first_prompt(f)))
         return 200, {"ok": True, "log": "\n".join(lines + [t("imp_done", n=n) if lines else t("nothing")])}
     if name == "look":
-        a = body.get("accent")
-        if not isinstance(a, (int, float)) or isinstance(a, bool) or not 0 <= a <= 2:
+        cur = load(LOOK)
+        cur = cur if isinstance(cur, dict) else {}
+        if not {"accent", "theme", "lang"} & set(body):
             return bad
-        save_json(LOOK, {"accent": round(float(a), 2)})
+        if "accent" in body:
+            a = body["accent"]
+            if not isinstance(a, (int, float)) or isinstance(a, bool) or not 0 <= a <= 2:
+                return bad
+            cur["accent"] = round(float(a), 2)
+        if "theme" in body:
+            if body["theme"] not in ("auto", "light", "dark"):
+                return bad
+            cur["theme"] = body["theme"]
+        if "lang" in body:
+            if body["lang"] not in ("zh", "en"):
+                return bad
+            cur["lang"] = body["lang"]
+            use_lang(body["lang"])
+        save_json(LOOK, cur)
         return 200, {"ok": True}
     if name == "doctor":
         _, log = captured(lambda: refresh_official(extra))
