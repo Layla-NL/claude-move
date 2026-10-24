@@ -387,7 +387,7 @@ class Panel(unittest.TestCase):
     """panel: token-gated local server; the switch button checks who is signed in, then quits, moves, reopens."""
     setUp, tearDown = Usage.setUp, Usage.tearDown
 
-    def start(self):
+    def start(self, *extra):
         import re
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
         env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
@@ -395,7 +395,7 @@ class Panel(unittest.TestCase):
                    CLAUDE_MOVE_QUIT_CMD=touch_cmd(self.home / "quit"), CLAUDE_MOVE_OPEN_CMD=touch_cmd(self.home / "open"),
                    CLAUDE_MOVE_TERM_CMD=touch_cmd(self.home / "term"),
                    CLAUDE_MOVE_UPDATE_URL=(self.home / "rel.json").as_uri(), CLAUDE_MOVE_NOTIFY_CMD=NOOP)
-        self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open"], stdout=subprocess.PIPE, text=True,
+        self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open", *extra], stdout=subprocess.PIPE, text=True,
                                      encoding="utf-8", env=env)
         self.addCleanup(lambda: (self.proc.kill(), self.proc.wait(), self.proc.stdout.close()))
         line = self.proc.stdout.readline()
@@ -541,6 +541,16 @@ class Panel(unittest.TestCase):
         self.assertEqual([(x["acct"], x["id"]) for x in json.loads(out)["sessions"]], [(self.a, "local_7")])
         self.assertEqual(self.call("/api/search?q=")[0], 400)
         self.assertEqual(self.call("/api/search?q=" + "x" * 81)[0], 400)
+
+    def test_demo_reads_nothing_and_does_nothing(self):
+        self.start("--demo")
+        page = self.call(f"/?t={self.token}", token=False)[1]
+        self.assertIn('data-acct="demo-work"', page)
+        self.assertNotIn(self.a, page)
+        out = json.loads(self.call("/api/move", {"from": self.a, "to": self.b, "range": "all"})[1])
+        self.assertFalse(out["ok"])
+        self.assertFalse((self.home / ".config/claude-move/panel.json").exists())
+        self.assertFalse((self.home / "quit").exists())
 
     def test_panel_accent_setting(self):
         self.start()
