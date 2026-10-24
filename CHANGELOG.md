@@ -4,6 +4,9 @@
 - The panel is redesigned. Each account is a card with a ball drawn by a small WebGL shader, its color following the account's tightest official limit along one ramp (blue, teal, green, yellow, amber at 75%, red at 90 and 95%, deep red when used up), with frosted glass over its lower half; no official % means silver. Tabs on the card switch between limits and the color travels along the ramp. Buttons are icons with a tooltip; the tools sit in a dock under the cards. Without WebGL, or with reduced motion, the ball is a still gradient.
 - Total use: a heatmap of every account's use at API list prices over 26 weeks, and by hour of the week; click a day for its projects (a worktree counts as its repository). Daily figures stay in the cache after Claude Code deletes old transcripts (the cache keeps 26 weeks and is rebuilt once).
 - The browser tab shows the desktop app's account: its ball as the icon, its number in the title.
+- Next 7 days: when each account's official limits reset and how long cooling lasts, on one timeline.
+- Search desktop sessions of every account by title, and copy a found one into the account the desktop app is signed into.
+- Keys in the panel: 1–9 open a card's terminal, / searches, R refreshes, Esc closes.
 - An accent setting for how much a second color drifts through each ball, kept in `~/.config/claude-move/look.json`.
 
 ## 0.5.0

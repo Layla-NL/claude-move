@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.parse
 from pathlib import Path
 
 FIVE_H = 5 * 3600
@@ -531,6 +532,16 @@ class Panel(unittest.TestCase):
         self.assertEqual(self.call("/api/accounts", token=False)[0], 403)
 
     @unittest.skipUnless(shutil.which("node"), "needs node to parse the page script")
+    def test_panel_search_sessions(self):
+        write(self.root / self.a / "org" / "local_7.json", sessionId="local_7", title="Fix the 登录 page",
+              lastActivityAt=int(self.now * 1000))
+        self.start()
+        code, out = self.call("/api/search?" + urllib.parse.urlencode({"q": "登录"}))
+        self.assertEqual(code, 200)
+        self.assertEqual([(x["acct"], x["id"]) for x in json.loads(out)["sessions"]], [(self.a, "local_7")])
+        self.assertEqual(self.call("/api/search?q=")[0], 400)
+        self.assertEqual(self.call("/api/search?q=" + "x" * 81)[0], 400)
+
     def test_panel_accent_setting(self):
         self.start()
         self.assertEqual(self.call("/api/look", {"accent": 1.5})[0], 200)

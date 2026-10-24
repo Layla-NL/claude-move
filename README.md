@@ -140,6 +140,11 @@ claude.ai chat and other devices are not included.
   hours of the week you use Claude Code most. Click a day to see the projects behind it. Claude Code deletes
   transcripts after 30 days by default; claude-move keeps the daily figures in its cache, so the heatmap fills
   in from the day you start using it.
+- **Next 7 days:** a line per account with a dot where each official limit resets (colored by how full it is) and a
+  red bar until a cooling account is back. The scale is stretched near "now", so the next hours are readable.
+- **Search** (top right) finds desktop sessions of every account by title. A result from another account has a
+  button that copies it into the account the desktop app is signed into (the app is closed and reopened).
+- **Keys:** 1–9 open that card's terminal, / searches, R refreshes the official %, Esc closes.
 - The browser tab shows the desktop app's account: its ball as the icon, its number in the title.
 - "Accent" in the dock sets how much a second color drifts through each ball; it is kept in
   `~/.config/claude-move/look.json`.
@@ -293,6 +298,9 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 - 每个号一张卡片，上面一颗像墨水一样慢慢流动的球。颜色跟着这个号最紧的那项官方额度走：用得少是蓝，往上经过青、绿、黄，75% 是琥珀，90% 和 95%（发通知的地方）转红，用完或冷却中是深红；数字变的时候，颜色沿着这条渐变走过去。没有官方百分比的号是银灰色，颜色从不估算。大数字是那项额度的已用百分比，下面的小标签切换看哪一项；冷却中的号显示几点恢复。
 - 按钮都是图标。鼠标停在上面（包括卡片右上角的 ✓ 和时钟），就会说明它做什么、官方数据是多久前取的。
 - **总消耗：** 所有账号按 API 价折算的用量热力图，近 26 周每天一格，旁边是一周里每个小时平均用多少；点某一天能看是哪些项目用的。Claude Code 默认 30 天后删会话记录，claude-move 会把每天的数留在缓存里，所以热力图从你开始用的那天起慢慢填满。
+- **接下来 7 天：** 每个号一条线，每项官方额度在它重置的时间点上有个圆点（颜色看那项用了多少），冷却中的号有条红条一直到恢复。刻度在“现在”附近拉开，接下来几个小时看得清楚。
+- **搜会话**（右上角）：按标题搜所有号在桌面 App 里的会话。搜到别的号的会话，旁边有个按钮能把它拷到桌面 App 现在登录的号（会关掉再重开 App）。
+- **快捷键：** 1–9 打开对应卡片的终端，/ 搜索，R 刷新官方百分比，Esc 关闭。
 - 浏览器标签页显示桌面 App 登录的那个号：图标是它的球，标题是它的数字。
 - 底部 Dock 里的“点缀”调节球里第二种颜色的多少，存在 `~/.config/claude-move/look.json`。
 

@@ -358,6 +358,16 @@ T = {
     "pp_d_notify": ("Notify", "通知"),
     "pp_d_login": ("Add login", "加登录"),
     "pp_d_upd": ("Update", "更新"),
+    "pp_next": ("Next 7 days", "接下来 7 天"),
+    "pp_next_tip": ("When each official limit resets; red runs until a cooling account is back", "每项官方额度几点重置；红条是冷却到几点"),
+    "pp_ticks": ("now,1h,5h,1d,3d,7d", "现在,1小时,5小时,1天,3天,7天"),
+    "pp_search": ("Search sessions", "搜会话"),
+    "pp_search_tip": ("Desktop sessions of every account, by title", "按标题搜所有号在桌面 App 里的会话"),
+    "pp_search_none": ("No session title has that.", "没有标题里带这个的会话。"),
+    "pp_bring": ("Copy to {a}, the account the desktop app is signed into (closes and reopens the app)",
+                 "拷到桌面 App 现在登录的 {a}（会关掉再重开 App）"),
+    "pp_keys": ("Keys: 1–9 open that card's terminal · / search · R refresh · Esc close",
+                "快捷键：1–9 打开对应卡片的终端 · / 搜索 · R 刷新 · Esc 关闭"),
     "w_desktop": ("Note: the desktop app's Code tab does not run status line scripts, so only CLI use is recorded.",
                   "注意：桌面 App 的 Code 页不运行状态栏脚本，只有用命令行版时才会记录。"),
 }
@@ -1526,6 +1536,7 @@ ICONS = {  # 24x24 stroked paths for the page's buttons
     "check": '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     "q": '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2-2.4 3.5M12 17h.01"/>',
     "info": '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.5h.01"/>',
+    "search": '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
     "flame": '<path d="M12 21a6.5 6.5 0 0 0 6.5-6.5c0-4-3-6-4-9.5-2 1.5-3 3.5-3 5.5-1-1-1.5-2-1.5-3.5-2.5 2-4.5 4.5-4.5 7.5A6.5 6.5 0 0 0 12 21z"/>',
 }
 
@@ -1645,8 +1656,22 @@ def render_html(rep, live=None):
         f = rep["first_back"]
         advice = (f'<span class="advice" data-tip="{tip(t("u_pick_none", a=f["name"], w=clock(f["cool"]["until"])))}">'
                   f'<span class="dot" data-heat="100"></span>{E(f["name"])} {E(short_clock(f["cool"]["until"], now))}</span>')
-    refresh = (f'<button class="ib raised" type="button" id="refresh" data-tip="{tip(t("p_refresh") + chr(10) + t("pp_refresh"))}">{icon("refresh")}</button>'
+    refresh = (f'<label class="search" data-tip="{tip(t("pp_search_tip"))}">{icon("search")}<input type="search" id="q" '
+               f'placeholder="{E(t("pp_search"))}" autocomplete="off"></label>'
+               f'<button class="ib raised" type="button" id="refresh" data-tip="{tip(t("p_refresh") + chr(10) + t("pp_refresh"))}">{icon("refresh")}</button>'
                if live else "")
+    found = '<section class="panel found" id="found" hidden></section>' if live else ""
+    nxt = []
+    for r in rep["rows"]:
+        marks = [{"k": row_label(x), "p": round(x.get("percent") or 0), "at": x["resets_at"]}
+                 for x in (r["official"] or {}).get("rows", []) if x.get("resets_at") and now < x["resets_at"] <= now + WEEK]
+        until = r["cool"]["until"] if r["cool"] else None
+        if marks or until:
+            nxt.append({"name": r["name"], "marks": marks, "cool": until,
+                        "cool_text": t("u_back", k=t("u_kind_week") if r["cool"]["kind"] == "seven_day" else t("u_kind_5h"),
+                                       w=clock(until)) if until else ""})
+    timeline = (f'<section class="panel next"><h2 data-tip="{tip(t("pp_next_tip"))}">{icon("clock")}{E(t("pp_next"))}</h2>'
+                f'<div id="next"></div></section>' if nxt else "")
     ramp = (f'<span data-tip="{tip(t("pp_legend_tip"))}">{E(t("pp_legend"))}</span><span class="ramp" id="ramp" aria-hidden="true">'
             + "".join(f'<b{" class=up" if i == len(LEVELS) - 1 else ""} style="left:{v}%">{v}</b>' for i, v in enumerate(LEVELS))
             + f'</span><span class="grey" aria-hidden="true"></span><span>{E(t("pp_none"))}</span>')
@@ -1670,17 +1695,18 @@ def render_html(rep, live=None):
 <div><p class="cap" id="h-hcap" data-tip="{tip(t("pp_hours_tip"))}"></p><div class="hm" id="h-hour"></div></div></div>
 <div class="dayinfo" id="h-day" hidden></div></section>'''
     data = {"heat": rep.get("heat"), "accent": look()["accent"], "pick": rep["pick"]["acct"] if rep["pick"] else "",
+            "now": now, "next": nxt, "ticks": t("pp_ticks"),
             "T": {k: t(k) for k in ("pp_used", "pp_resets", "pp_idle", "pp_avg", "pp_hours", "pp_cal", "pp_all_accts",
-                                    "pp_wd", "pp_wdfmt", "pp_months")}}
+                                    "pp_wd", "pp_wdfmt", "pp_months", "pp_resets")}}
     blob = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     sprite = ('<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
               + "".join(f'<symbol id="i-{k}" viewBox="0 0 24 24">{v}</symbol>' for k, v in ICONS.items()) + "</svg>")
     return f"""<!doctype html><html lang="{'zh' if ZH else 'en'}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Claude Move</title><link rel="icon" id="favicon" href="data:,">
 <style>{PANEL_CSS}{TOOLS_CSS if live else ""}</style></head><body>{sprite}<div id="tip" role="tooltip"></div><main>
-<div class="top"><div><h1>Claude Move <span class="info" data-tip="{tip(t("u_title") + chr(10) + chr(10) + t("u_notes"))}">{icon("info")}</span></h1>
+<div class="top"><div><h1>Claude Move <span class="info" data-tip="{tip(t("u_title") + chr(10) + chr(10) + t("u_notes") + (chr(10) + chr(10) + t("pp_keys") if live else ""))}">{icon("info")}</span></h1>
 <div class="sub">{E(t("u_head"))} · {E(clock(now))} · {__version__}</div></div><div class="topr">{advice}{refresh}</div></div>
-{live_bar(live)}<div class="grid">{"".join(cards)}</div>{heat}{bottom}</main>
+{found}{live_bar(live)}<div class="grid">{"".join(cards)}</div>{timeline}{heat}{bottom}</main>
 <script>{PANEL_JS.replace("__DATA__", blob)}</script>{live_script(live)}</body></html>"""
 
 
@@ -1700,7 +1726,7 @@ def live_script(live):
     if not live:
         return ""
     texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm",
-                               "p_term_done", "p_step1", "p_step2", "pp_last")}
+                               "p_term_done", "p_step1", "p_step2", "pp_last", "pp_search_none", "pp_bring")}
     return f"""<script>
 const T = {json.dumps(texts, ensure_ascii=False)}, KEY = {json.dumps(live["token"])};
 const fmt = (s, o) => s.replace(/\\{{(\\w+)\\}}/g, (_, k) => o[k] ?? "");
@@ -1758,6 +1784,51 @@ document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => {{
   if (on) setTimeout(() => d.scrollIntoView({{block: "nearest", behavior: "smooth"}}), 30);
 }});
 document.querySelectorAll(".toolbox details").forEach(d => d.addEventListener("toggle", syncDock));
+const q = byId("q"), found = byId("found");
+let typing = 0;
+q.oninput = () => {{ clearTimeout(typing); typing = setTimeout(search, 250); }};
+async function search() {{
+  const v = q.value.trim();
+  if (!v) {{ found.hidden = true; return; }}
+  const r = await api("/api/search?q=" + encodeURIComponent(v));
+  found.hidden = false; found.innerHTML = "";
+  if (!(r.sessions || []).length) {{ const p = document.createElement("p"); p.textContent = T.pp_search_none; found.append(p); return; }}
+  r.sessions.forEach(x => {{
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = '<span class="who2"></span><span class="t"></span><small></small>';
+    row.children[0].textContent = x.name; row.children[1].textContent = x.title; row.children[2].textContent = day(x.last);
+    if (state && state.signed && state.signed.acct !== x.acct) {{
+      const b = document.createElement("button");
+      b.className = "ib"; b.type = "button"; b.innerHTML = '<svg class="i"><use href="#i-move"/></svg>';
+      b.dataset.tip = fmt(T.pp_bring, {{a: state.signed.name}});
+      b.onclick = async () => {{
+        if (!confirm(fmt(T.p_confirm, {{a: state.signed.name}}))) return;
+        showLog(T.p_working);
+        showLog((await api("/api/move", {{from: x.acct, to: state.signed.acct, range: "pick", only: [x.id]}})).log);
+      }};
+      row.append(b);
+    }}
+    found.append(row);
+  }});
+}}
+document.addEventListener("keydown", e => {{
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (e.key === "Escape") {{
+    if (tag === "input") e.target.blur();
+    found.hidden = true;
+    document.querySelectorAll(".toolbox details").forEach(x => {{ x.open = false; }});
+    return;
+  }}
+  if (["input", "textarea", "select"].includes(tag)) return;
+  if (e.key === "/") {{ e.preventDefault(); q.focus(); }}
+  else if (e.key === "r" || e.key === "R") byId("refresh").click();
+  else if (/^[1-9]$/.test(e.key)) {{
+    const card = document.querySelectorAll(".card")[+e.key - 1], b = card && card.querySelector("[data-term]:not([data-rc])");
+    if (b) b.click();
+  }}
+}});
 poll(); setInterval(poll, 3000);
 {tools_js()}
 byId("dock-login").onclick = () => login({{}});
@@ -1885,7 +1956,25 @@ pre.log{flex-basis:100%;white-space:pre-wrap;font:12px/1.5 var(--mono);backgroun
 .grey{width:8px;height:8px;border-radius:50%;background:#a0a6b0}
 .legend label{display:flex;gap:6px;align-items:center}
 .legend input{width:110px;margin:0}
-@media (max-width:640px){.go{width:100%;justify-content:center}.sp{display:none}}
+.search{display:flex;align-items:center;gap:6px;background:var(--raise);box-shadow:var(--pill);border-radius:11px;padding:0 10px;height:34px;color:var(--dim)}
+.search input{border:0;background:none;font:inherit;font-size:13px;color:var(--ink);width:150px;outline:none;min-width:0}
+.found{padding:8px 10px;display:grid;gap:2px;max-height:360px;overflow:auto}
+.found .row{display:flex;gap:10px;align-items:center;padding:4px 8px;border-radius:10px;font-size:13px}
+.found .row:hover{background:var(--hair)}
+.found .row .t{flex:1;min-width:0;overflow-wrap:anywhere}
+.found small{color:var(--dim);font:11px var(--mono)} .found .who2{font-size:12px;color:var(--dim);min-width:64px}
+.found p{margin:6px 8px;color:var(--dim)}
+.next{padding:16px 20px 18px}
+.next h2{margin:0 0 12px;font:600 15px var(--display);display:flex;gap:8px;align-items:center}
+.tl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 14px;align-items:center}
+.axis{position:relative;height:14px;font:10px var(--mono);color:var(--dim)}
+.axis b{position:absolute;transform:translateX(-50%);font-weight:500;white-space:nowrap}
+.axis b:first-child{transform:none} .axis b:last-child{transform:translateX(-100%)}
+.tn{font-size:12px;font-weight:600;text-align:right;white-space:nowrap}
+.track{position:relative;height:12px;border-radius:99px;background:var(--cell)}
+.coolbar{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--hot);opacity:.85}
+.mk{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--card)}
+@media (max-width:640px){.go{width:100%;justify-content:center}.sp{display:none}.search input{width:100px}}
 @media (prefers-reduced-motion:reduce){#tip{transition:none}.ib.spin svg{animation:none}}
 """
 
@@ -2079,10 +2168,33 @@ if (acc) acc.oninput = () => {
   clearTimeout(saving); saving = setTimeout(() => window.CM.saveAccent && window.CM.saveAccent(ACC), 400);
 };
 
+const WD = S.pp_wd.split(",");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+
+/* the next 7 days: when each official limit resets, and until when a cooling account is out.
+   The axis is a square root of time, so the next few hours get as much room as the rest of the week. */
+const NX = document.getElementById("next");
+if (NX && D.next) {
+  const x = at => Math.sqrt(Math.max(0, Math.min(1, (at - D.now) / (7 * 86400)))) * 100;
+  const two = n => String(n).padStart(2, "0");
+  const whenText = at => { const d = new Date(at * 1000), hm = two(d.getHours()) + ":" + two(d.getMinutes());
+    return at - D.now < 20 * 3600 ? hm : fmt(S.pp_wdfmt, {d: WD[(d.getDay() + 6) % 7]}) + " " + hm; };
+  const ticks = D.ticks.split(","), secs = [0, 3600, 5 * 3600, 86400, 3 * 86400, 7 * 86400];
+  const group = marks => {  // limits that reset together share one dot, colored by the fullest
+    const by = {};
+    marks.forEach(m => (by[Math.round(m.at / 60)] = by[Math.round(m.at / 60)] || []).push(m));
+    return Object.values(by);
+  };
+  NX.innerHTML = `<div class="tl"><span></span><div class="axis">${secs.map((s, i) => `<b style="left:${x(D.now + s)}%">${esc(ticks[i])}</b>`).join("")}</div>` +
+    D.next.map(a => `<span class="tn">${esc(a.name)}</span><div class="track">${a.cool ? `<i class="coolbar" style="width:${x(a.cool)}%" data-tip="${esc(a.cool_text)}"></i>` : ""}${
+      group(a.marks).map(g => `<i class="mk" style="left:${x(g[0].at)}%;background:${hex(palette(Math.max(...g.map(m => m.p)))[1])}" data-tip="${
+        esc(g.map(m => m.k + " " + m.p + "%").join("\n") + "\n" + fmt(S.pp_resets, {w: whenText(g[0].at)}))}"></i>`).join("")}</div>`).join("") + "</div>";
+}
+
 /* total use: the last 26 weeks by day, and the hours of the week */
 const H = D.heat;
 if (H) {
-  const WD = S.pp_wd.split(","), MON = S.pp_months.split(","), N = H.cal[Object.keys(H.cal)[0]]?.length || 0;
+  const MON = S.pp_months.split(","), N = H.cal[Object.keys(H.cal)[0]]?.length || 0;
   let who = "*";  // every account; "" is CLI use no account could be matched to
   const keys = H.accts.map(a => a.k), name = k => (H.accts.find(a => a.k === k) || {}).name || k;
   const all = () => who === "*";
@@ -2097,7 +2209,6 @@ if (H) {
   const dayOf = i => { const d = new Date(start); d.setDate(d.getDate() + i); return d; };
   const label = d => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${fmt(S.pp_wdfmt, {d: WD[(d.getDay() + 6) % 7]})}`;
   const rowsHtml = WD.map((w, i) => `<span>${i % 2 ? "" : w}</span>`).join("");
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
   function drawHeat() {
     const vals = Array.from({length: N}, (_, i) => val(H.cal, i)), lv = levels(vals);
     document.getElementById("h-total").textContent = money(vals.reduce((s, v) => s + v, 0));
@@ -3335,6 +3446,16 @@ def panel_api(method, path, q, body, extra=()):
             return 200, {"backups": out}
         if name == "runs":
             return 200, {"runs": run_list()}
+        if name == "search":
+            needle = str(q.get("q") or "").strip().casefold()
+            if not 0 < len(needle) <= 80:
+                return bad
+            out = []
+            for a in accts:
+                if a["desk"]:
+                    out += [dict(x, acct=a["acct"], name=a["name"]) for x in desk_sessions(a["acct"]) or []
+                            if needle in x["title"].casefold()]
+            return 200, {"sessions": sorted(out, key=lambda x: x["last"], reverse=True)[:40]}
         if name == "cli-sessions":
             if not cfg or cfg.resolve() == DESKTOP_HOME.resolve():
                 return bad
