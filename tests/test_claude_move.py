@@ -285,6 +285,23 @@ class Usage(unittest.TestCase):
         self.assertEqual(list(recent), ["p"])  # no cwd recorded: named after its projects/ folder
         self.assertGreater(sum(sum(v) for v in heat["cal"].values()), 2)
 
+    def test_menu_bar(self):
+        lim = self.home / ".config/claude-move/limits.json"
+        lim.parent.mkdir(parents=True, exist_ok=True)
+        lim.write_text(json.dumps({self.b: {"at": self.now, "rows": [
+            {"kind": "weekly_all", "percent": 96, "resets_at": self.now + 86400},
+            {"kind": "session", "percent": 10, "resets_at": self.now - 60}]}}))
+        lines = self.run_tool("bar").stdout.splitlines()
+        self.assertEqual(lines[0], "● 96% | color=#e8352a")  # the account the app is signed into, red past 95
+        self.assertTrue(lines[2].startswith("● bbbbbbbb  week 96% |"), lines[2])
+        self.assertNotIn("5h", lines[2])  # a window that has reset since is left out
+        if not WIN:
+            d = self.home / "plugins"
+            self.run_tool("bar", "install", "--dir", str(d))
+            self.assertTrue(os.access(d / "claude-move.1m.sh", os.X_OK))
+            self.run_tool("bar", "uninstall", "--dir", str(d))
+            self.assertFalse((d / "claude-move.1m.sh").exists())
+
     def test_watch_records_official_limits_and_restores_old_status_line(self):
         cfg = self.home / "cli"
         cfg.mkdir()

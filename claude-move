@@ -360,6 +360,13 @@ T = {
     "pp_d_upd": ("Update", "更新"),
     "pp_demo": ("Demo: sample accounts, nothing read from this computer; buttons do nothing.",
                 "演示：示例账号，不读这台电脑上的任何东西；按钮不做事。"),
+    "pp_open": ("Open the panel", "打开面板"),
+    "bar_done": ("Menu bar plugin written to {p}; SwiftBar or xbar shows it within a minute.", "菜单栏插件已写到 {p}，SwiftBar 或 xbar 一分钟内就会显示。"),
+    "bar_nodir": ("Found neither SwiftBar nor xbar. Install one (brew install --cask swiftbar), pick its plugin folder, then run this again; or pass --dir.",
+                  "没找到 SwiftBar 或 xbar。先装一个（brew install --cask swiftbar）并选好插件文件夹，再运行一次；或者用 --dir 指定文件夹。"),
+    "bar_removed": ("Removed {p}.", "已删除 {p}。"),
+    "bar_none": ("No menu bar plugin found.", "没找到菜单栏插件。"),
+    "bar_mac": ("The menu bar plugin is for macOS (SwiftBar or xbar).", "菜单栏插件只支持 macOS（SwiftBar 或 xbar）。"),
     "pp_next": ("Next 7 days", "接下来 7 天"),
     "pp_next_tip": ("When each official limit resets; red runs until a cooling account is back", "每项官方额度几点重置；红条是冷却到几点"),
     "pp_ticks": ("now,1h,5h,1d,3d,7d", "现在,1小时,5小时,1天,3天,7天"),
@@ -3016,6 +3023,92 @@ def git_bash():
     return None
 
 
+# ---------- menu bar (SwiftBar / xbar)
+BAR_RAMP = ("#2a6fe0", "#2777e2", "#267ee3", "#2685e4", "#278ce5", "#2b93e6", "#009ada", "#00a0cb", "#00a4bb", "#00a7aa", "#14a89a",
+            "#44ae7c", "#76ae57", "#a5a92a", "#d19e00", "#f5901f", "#f67d0b", "#f56a0e", "#f2551f", "#e8352a", "#cf1f24")  # the panel's ramp, every 5%
+BAR_FILE = "claude-move.1m.sh"
+
+
+def bar_color(pct):
+    return "#9ba2ac" if pct is None else BAR_RAMP[max(0, min(20, round(pct / 5)))]
+
+
+def bar_lines(now=None):
+    """What SwiftBar/xbar shows: a ball for the desktop app's account (else the fullest), and a line per account.
+    Only official numbers already saved are read, so it runs in a blink every minute."""
+    now = now or time.time()
+    official, nm = load(LIMITS) or {}, names()
+    accts = []
+    for acct, off in official.items():
+        rows = official_rows(off) if isinstance(off, dict) and now - off.get("at", 0) < 3 * 86400 else []
+        rows = [r for r in rows if not (r.get("resets_at") and r["resets_at"] < now)]  # a window that has reset since
+        if rows:
+            top = max(rows, key=lambda r: r.get("percent") or 0)
+            accts.append((acct, nm.get(acct) or acct[:8], rows, top))
+    timeline = signin_timeline()
+    signed = timeline[-1][1] if timeline else None
+    shown = next((a for a in accts if a[0] == signed), None) or max(accts, key=lambda a: a[3].get("percent") or 0, default=None)
+    me, py = bar_q(str(Path(__file__).resolve())), bar_q(sys.executable)
+    if shown:
+        pct = round(shown[3].get("percent") or 0)
+        out = [f"● {pct}% | color={bar_color(pct)}", "---"]
+    else:
+        out = [f"● | color={bar_color(None)}", "---"]
+    for acct, name, rows, top in sorted(accts, key=lambda a: a[1].lower()):
+        pct = round(top.get("percent") or 0)
+        cool = pct >= 100 and top.get("resets_at")
+        text = t("u_back", k=row_label(top), w=clock(top["resets_at"])) if cool else rows_text(rows)
+        out.append(f"{'● ' if acct == signed else ''}{name}  {text} | color={bar_color(pct)}")
+    out += ["---", f"{t('pp_open')} | bash={py} param1={me} param2=panel terminal=false",
+            f"{t('p_refresh')} | bash={py} param1={me} param2=usage param3=--refresh terminal=false refresh=true"]
+    return out
+
+
+def bar_q(x):
+    return f'"{x}"' if any(c.isspace() for c in x) else x  # SwiftBar and xbar take double-quoted values
+
+
+def shlex_quote(x):
+    from shlex import quote
+    return quote(x)
+
+
+def bar_dirs():
+    try:
+        d = subprocess.run(["defaults", "read", "com.ameba.SwiftBar", "PluginDirectory"], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        d = ""
+    xbar = HOME / "Library/Application Support/xbar/plugins"
+    if d:
+        return [Path(os.path.expanduser(d))]
+    return [xbar] if xbar.is_dir() else []
+
+
+def cmd_bar(args):
+    if args.action == "show":
+        print("\n".join(bar_lines()))
+        return
+    if WIN:
+        sys.exit(t("bar_mac"))
+    dirs = [Path(os.path.expanduser(args.dir))] if args.dir else bar_dirs()
+    if args.action == "uninstall":
+        gone = [d / BAR_FILE for d in dirs if (d / BAR_FILE).exists()]
+        for f in gone:
+            f.unlink()
+            print(t("bar_removed", p=f))
+        if not gone:
+            print(t("bar_none"))
+        return
+    if not dirs:
+        sys.exit(t("bar_nodir"))
+    f = dirs[0] / BAR_FILE
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("#!/bin/sh\n# <xbar.title>Claude Move</xbar.title>\n# <xbar.desc>Quota per account, from claude-move</xbar.desc>\n"
+                 f"exec {shlex_quote(sys.executable)} {shlex_quote(str(Path(__file__).resolve()))} bar\n", encoding="utf-8")
+    f.chmod(0o755)
+    print(t("bar_done", p=f))
+
+
 # ---------- notifications
 def notify_conf():
     c = load(NOTIFY)
@@ -3946,6 +4039,10 @@ def main(argv=None):
     dr.add_argument("--refresh", action="store_true", help="first ask each CLI login its official /usage")
     dr.add_argument("--config", action="append", help="also check this CLI config folder (repeatable)")
     dr.set_defaults(fn=cmd_doctor)
+    br = sub.add_parser("bar", help="macOS menu bar ball through SwiftBar or xbar: `bar` prints it, `bar install` adds the plugin")
+    br.add_argument("action", nargs="?", default="show", choices=["show", "install", "uninstall"])
+    br.add_argument("--dir", help="plugin folder (default: SwiftBar's, else xbar's)")
+    br.set_defaults(fn=cmd_bar)
     w = sub.add_parser("watch", help="record official CLI rate limits from the Claude Code status line")
     w.add_argument("action", choices=["install", "uninstall", "record"])
     w.set_defaults(fn=cmd_watch)

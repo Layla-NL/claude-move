@@ -7,6 +7,7 @@
 - Next 7 days: when each account's official limits reset and how long cooling lasts, on one timeline.
 - Search desktop sessions of every account by title, and copy a found one into the account the desktop app is signed into.
 - Keys in the panel: 1–9 open a card's terminal, / searches, R refreshes, Esc closes.
+- `bar install` (macOS): a menu bar ball through SwiftBar or xbar, colored like the panel, with every account in its menu; it reads only the official numbers already saved.
 - `panel --demo`: the panel with sample accounts, for screenshots or a first look; it reads nothing on this computer and its buttons do nothing.
 - An accent setting for how much a second color drifts through each ball, kept in `~/.config/claude-move/look.json`.
 
