@@ -267,6 +267,23 @@ class Usage(unittest.TestCase):
         self.assertIn("<!doctype html>", page)
         self.assertIn("prefers-color-scheme:dark", page)
 
+    def test_heatmap_by_day_and_project(self):
+        import re
+        cm = load_tool("cmh")
+        tree = cm.project_dir_name("/u/code/shop/.claude/worktrees/brave-x1")
+        self.assertEqual(cm.project_of(tree, "/u/code/shop/.claude/worktrees/brave-x1/src"), "shop")  # a worktree is its repo
+        self.assertEqual(cm.project_of(cm.project_dir_name("/u/code/shop"), "/u/code/shop/tests"), "shop")  # not the subfolder
+        self.assertIsNone(cm.project_of(tree, "/tmp/scratch"))
+        r = self.run_tool("usage", "--html", "--no-open")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        page = (self.home / ".config/claude-move/usage.html").read_text(encoding="utf-8")
+        heat = json.loads(re.search(r"const D = (\{.*?\}), S = D\.T;", page, re.S).group(1))["heat"]
+        self.assertEqual(len(heat["proj"]), 182)
+        self.assertIn("", heat["cal"])  # the CLI reply no account could be matched to
+        recent = heat["proj"][-1] or heat["proj"][-2]
+        self.assertEqual(list(recent), ["p"])  # no cwd recorded: named after its projects/ folder
+        self.assertGreater(sum(sum(v) for v in heat["cal"].values()), 2)
+
     def test_watch_records_official_limits_and_restores_old_status_line(self):
         cfg = self.home / "cli"
         cfg.mkdir()
@@ -514,6 +531,16 @@ class Panel(unittest.TestCase):
         self.assertEqual(self.call("/api/accounts", token=False)[0], 403)
 
     @unittest.skipUnless(shutil.which("node"), "needs node to parse the page script")
+    def test_panel_accent_setting(self):
+        self.start()
+        self.assertEqual(self.call("/api/look", {"accent": 1.5})[0], 200)
+        saved = json.loads((self.home / ".config/claude-move/look.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["accent"], 1.5)
+        for bad in (5, -1, "1", True, None):
+            self.assertEqual(self.call("/api/look", {"accent": bad})[0], 400)
+        page = self.call(f"/?t={self.token}", token=False)[1]
+        self.assertIn('id="accent" min="0" max="200" value="150"', page)
+
     def test_panel_script_parses(self):
         import re
         self.start()

@@ -127,12 +127,29 @@ Repeat with another folder name (`~/.claude-personal`, ...) per account, then ru
 `claude-move usage --html` also writes a panel page and opens it. It counts Claude Code on this Mac only;
 claude.ai chat and other devices are not included.
 
+### What the panel shows
+
+- Each account is a card with a ball of slowly flowing ink. Its color follows the account's tightest official
+  limit: blue when little is used, then teal, green and yellow, amber at 75%, red at 90% and 95% (where
+  notifications fire), deep red when used up or cooling. When the number changes, the color travels along that
+  ramp. An account with no official % is silver: the color is never estimated. The big number is that limit's %
+  used, the small tabs under it switch to another limit, and a cooling account shows when it is back.
+- Buttons are icons. Hover one, or the check mark or clock in a card's corner, to see what it does and how old
+  the official numbers are.
+- **Total use:** every account's use at API list prices as a heatmap, one square a day for 26 weeks, next to the
+  hours of the week you use Claude Code most. Click a day to see the projects behind it. Claude Code deletes
+  transcripts after 30 days by default; claude-move keeps the daily figures in its cache, so the heatmap fills
+  in from the day you start using it.
+- The browser tab shows the desktop app's account: its ball as the icon, its number in the title.
+- "Accent" in the dock sets how much a second color drifts through each ball; it is kept in
+  `~/.config/claude-move/look.json`.
+
 ### Switching from the panel
 
 `claude-move panel` opens the panel with a switch button. Signing in stays with you, in the app's own sign-in:
 
 1. In the desktop app, log out, sign in with the account you want, and open the Code tab once.
-2. In the panel, press "Move sessions from A to B and reopen the app". It checks that the app really is signed
+2. In the panel, press the black "A → B" button. It checks that the app really is signed
    into B (from the app's log), quits the app, runs the same copy as `claude-move to B` (backup first), and
    reopens the app.
 
@@ -154,7 +171,7 @@ So you never need a terminal, the panel also does the rest. Each card can be ren
 status line recorder" for its CLI login (it asks first, since that edits the login's `settings.json`), or "Add CLI
 login" when the account has none: that opens a Terminal window with the CLI's own `claude auth login --claudeai` for
 a new `~/.claude-<name>` folder, you sign in in the browser, and the panel names the account once the login shows
-up. Below the cards:
+up. In the dock under the cards:
 
 - **Move sessions:** pick source, target and which sessions (last 3 or 7 days, all, or ticked ones), preview, then
   move. An open desktop app is quit and reopened around the move.
@@ -248,7 +265,7 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 - `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
 - `usage [--refresh] [--html] [--config 目录]`：各账号额度面板；`--refresh` 先向每个命令行登录问官方 `/usage`，`--html` 打开网页版。
-- `panel`：在浏览器里打开带按钮的面板（只在本机 127.0.0.1 上）。换号时：先在桌面 App 里退出登录、登上新号、打开一次 Code 页，再回面板点“把 A 的会话搬到 B，并重开 App”。面板会先从 App 日志确认 App 现在登录的确实是 B，然后退出 App、照 `claude-move to B` 搬会话（先备份）、重新打开 App。登录这一步始终由你在 App 里自己点。请在“终端”里运行 `claude-move panel`，不要在桌面 App 的 Claude Code 会话里运行，因为退出 App 会连那个会话一起关掉。有命令行登录的号，卡片上有“打开终端”：弹出一个新终端窗口，在这个号最近用过的项目文件夹里，用它自己的配置目录运行 `claude`（和 `claude-move term <账号>` 一样，不读登录信息）；“打开终端（手机可连）”再加上 `--remote-control <名字>`，手机 Claude App 登录同一个号就能连上。两条命令也都能一键复制。`~/.claude` 和某个 `~/.claude-*` 显示的是同一个号时，用 `~/.claude-*` 那个。
+- `panel`：在浏览器里打开带按钮的面板（只在本机 127.0.0.1 上）。换号时：先在桌面 App 里退出登录、登上新号、打开一次 Code 页，再回面板点黑色的“A → B”按钮。面板会先从 App 日志确认 App 现在登录的确实是 B，然后退出 App、照 `claude-move to B` 搬会话（先备份）、重新打开 App。登录这一步始终由你在 App 里自己点。请在“终端”里运行 `claude-move panel`，不要在桌面 App 的 Claude Code 会话里运行，因为退出 App 会连那个会话一起关掉。有命令行登录的号，卡片上有“打开终端”：弹出一个新终端窗口，在这个号最近用过的项目文件夹里，用它自己的配置目录运行 `claude`（和 `claude-move term <账号>` 一样，不读登录信息）；“打开终端（手机可连）”再加上 `--remote-control <名字>`，手机 Claude App 登录同一个号就能连上。两条命令也都能一键复制。`~/.claude` 和某个 `~/.claude-*` 显示的是同一个号时，用 `~/.claude-*` 那个。
 - `app install [--icon 图片] [--no-dock]`：生成 `~/Applications/Claude Move.app` 并放进程序坞，双击就打开面板，不用开终端。它独立运行，从面板退出桌面 App 不会把它关掉；再双击会回到已经开着的面板；页面关掉 30 分钟后自己停。`--icon` 可以换成任意图片当图标。
 - `term <账号> [--rc]`：弹出一个终端窗口，在这个号最近用过的项目文件夹里，用它的命令行登录目录（`CLAUDE_CONFIG_DIR=~/.claude-<名字>`）运行 Claude Code；`--rc` 以 Remote Control 会话启动、用账号名字命名，手机 App 登录同一个号就能连上。
 - `run <账号> [--rc] [--resume id] [-- claude 的参数]`：用这个号运行 Claude Code，撞到额度上限时把会话搬到剩得最多的号接着干（见下面）。
@@ -272,9 +289,16 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 每个号换一个目录名（`~/.claude-personal` 等）照做一遍，然后运行 `claude-move usage --refresh --html`。
 只算这台 Mac 上的 Claude Code，网页聊天和别的设备上的用量算不进来。
 
+**面板长什么样：**
+- 每个号一张卡片，上面一颗像墨水一样慢慢流动的球。颜色跟着这个号最紧的那项官方额度走：用得少是蓝，往上经过青、绿、黄，75% 是琥珀，90% 和 95%（发通知的地方）转红，用完或冷却中是深红；数字变的时候，颜色沿着这条渐变走过去。没有官方百分比的号是银灰色，颜色从不估算。大数字是那项额度的已用百分比，下面的小标签切换看哪一项；冷却中的号显示几点恢复。
+- 按钮都是图标。鼠标停在上面（包括卡片右上角的 ✓ 和时钟），就会说明它做什么、官方数据是多久前取的。
+- **总消耗：** 所有账号按 API 价折算的用量热力图，近 26 周每天一格，旁边是一周里每个小时平均用多少；点某一天能看是哪些项目用的。Claude Code 默认 30 天后删会话记录，claude-move 会把每天的数留在缓存里，所以热力图从你开始用的那天起慢慢填满。
+- 浏览器标签页显示桌面 App 登录的那个号：图标是它的球，标题是它的数字。
+- 底部 Dock 里的“点缀”调节球里第二种颜色的多少，存在 `~/.config/claude-move/look.json`。
+
 **撞上限自动续接：** `claude-move run <账号>` 用这个号的命令行登录启动 `claude`，会话 id 由它事先定好，然后盯着这个会话的记录（子代理的也算）。一出现官方的限额提示，就挨个问别的命令行登录的 `/usage`，挑没在冷却、剩得最多的那个；然后停掉 `claude`，把会话记录复制到那个号的目录（那边原来有这个会话的话，先另存到 `~/.config/claude-move/run-backups`），在那边 `claude --resume <id>` 接上，并发一句“接着做”。原来那份记录不动。没有能换的号时，`claude` 原样留着，并弹通知告诉你。`--rc` 让每一段都是用账号名字命名的 Remote Control 会话。面板上勾选“打开的终端撞到额度上限时自动换号接着干”，打开终端的按钮就会走 `run`。只对命令行版有效，桌面 App 的登录还是你自己点；后台任务和正在跑的工具调用不会跟过去，新号拿到的是对话本身，从那里接着做。这样轮换几个号是否允许，取决于 Anthropic 对你这个套餐的条款，用之前先看一下。
 
-**面板里全都能做（不用开命令行）：** 每张卡片可以改名；有命令行登录的号可以“装/卸状态栏记录器”（会改这个登录的 `settings.json`，点之前会问你）；没有命令行登录的号有“加命令行登录”：弹出终端窗口跑官方的 `claude auth login --claudeai`，登录目录是新建的 `~/.claude-<名字>`，你在浏览器里登录，面板认出来后自动给它起名。卡片下面还有：
+**面板里全都能做（不用开命令行）：** 每张卡片可以改名；有命令行登录的号可以“装/卸状态栏记录器”（会改这个登录的 `settings.json`，点之前会问你）；没有命令行登录的号有“加命令行登录”：弹出终端窗口跑官方的 `claude auth login --claudeai`，登录目录是新建的 `~/.claude-<名字>`，你在浏览器里登录，面板认出来后自动给它起名。卡片下面的 Dock 里还有：
 - **搬会话：** 选从哪个号搬到哪个号、搬哪些（最近 3 天、7 天、全部，或者勾选），先预览再搬；桌面 App 开着的话会先退出、搬完再打开。
 - **撤回搬家：** 列出备份，每个都能一键撤回。
 - **各账号的会话**，以及 **命令行会话导入桌面 App**（面板版的 `import-cli`）。

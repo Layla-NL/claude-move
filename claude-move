@@ -38,7 +38,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 WIN = sys.platform == "win32"
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
@@ -319,6 +319,45 @@ T = {
     "w_already": ("Already installed in {p}.", "{p} 里已经装过了。"),
     "w_off": ("Removed from {p}; your previous status line setting is back.", "已从 {p} 移除，原来的状态栏设置已恢复。"),
     "w_none": ("Not installed in {p}.", "{p} 里没装。"),
+    "pp_desk": ("The desktop app is signed into this account", "桌面 App 正登录这个号"),
+    "pp_nooff": ("No official % yet: press refresh, or install the status line recorder", "还没有官方百分比：点刷新，或装状态栏记录器"),
+    "pp_none": ("no official %", "无官方数据"),
+    "pp_used": ("{k} used", "{k}已用"),
+    "pp_resets": ("resets {w}", "{w} 重置"),
+    "pp_back": ("{k} limit used up · back", "{k}额度用完 · 恢复"),
+    "pp_last": ("last {a}", "上次 {a}"),
+    "pp_pick": ("try {a}", "建议 {a}"),
+    "pp_auto": ("Go on", "续接"),
+    "pp_all": ("All", "全部"),
+    "pp_refresh": ("Asks each CLI login's /usage; uses no quota", "问每个命令行登录的 /usage，不耗额度"),
+    "pp_heat": ("Total use", "总消耗"),
+    "pp_heat_tip": ("All accounts at API list prices; Claude Code on this computer only", "所有账号加起来、按 API 价折算；只算这台电脑上的 Claude Code"),
+    "pp_all_accts": ("All", "全部"),
+    "pp_cal": ("Last 26 weeks", "近 26 周"),
+    "pp_cal_tip": ("One square a day; click one to see its projects", "每格一天，点一下看是哪些项目"),
+    "pp_hours": ("Hours of the week · {d} a week", "一周里的时段 · 平均每周 {d}"),
+    "pp_hours_tip": ("Average use in each hour of the week", "一周里每个小时平均用多少"),
+    "pp_idle": ("none", "没用"),
+    "pp_avg": ("avg {d}", "平均 {d}"),
+    "pp_less": ("less", "少"),
+    "pp_more": ("more", "多"),
+    "pp_wd": ("Mon,Tue,Wed,Thu,Fri,Sat,Sun", "一,二,三,四,五,六,日"),
+    "pp_wdfmt": ("{d}", "周{d}"),
+    "pp_months": ("Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec", "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月"),
+    "pp_legend": ("Quota", "额度"),
+    "pp_legend_tip": ("Each ball follows its account's tightest official limit; notifications fire at 75 / 90 / 95",
+                      "球的颜色跟着这个号最紧的那项官方额度走；75 / 90 / 95 是发通知的地方"),
+    "pp_accent": ("Accent", "点缀"),
+    "pp_accent_tip": ("How much a second color drifts through each ball", "球里点缀色的强度：往左更纯，往右更花"),
+    "pp_d_move": ("Pick", "挑着搬"),
+    "pp_d_undo": ("Undo", "撤回"),
+    "pp_d_sess": ("Sessions", "会话"),
+    "pp_d_imp": ("Import", "导入"),
+    "pp_d_runs": ("Go on", "续接"),
+    "pp_d_doc": ("Check", "自检"),
+    "pp_d_notify": ("Notify", "通知"),
+    "pp_d_login": ("Add login", "加登录"),
+    "pp_d_upd": ("Update", "更新"),
     "w_desktop": ("Note: the desktop app's Code tab does not run status line scripts, so only CLI use is recorded.",
                   "注意：桌面 App 的 Code 页不运行状态栏脚本，只有用命令行版时才会记录。"),
 }
@@ -739,10 +778,11 @@ def import_one(f, dst_cfg):
 
 # ---------- quota panel: usage / watch
 CONF = NAMES.parent
-CACHE = Path(os.environ.get("CLAUDE_MOVE_CACHE", str(HOME / ".cache/claude-move/usage-v2.json")))
+CACHE = Path(os.environ.get("CLAUDE_MOVE_CACHE", str(HOME / ".cache/claude-move/usage-v3.json")))
 LOGS = Path(os.environ.get("CLAUDE_MOVE_LOGS") or (ROOT.parent / "logs" if WIN else HOME / "Library/Logs/Claude"))
 LIMITS = CONF / "limits.json"
 PANEL = CONF / "panel.json"
+LOOK = CONF / "look.json"
 WATCH = CONF / "watch.json"
 LOGINS = CONF / "logins.json"
 NOTIFY = CONF / "notify.json"
@@ -750,7 +790,8 @@ NOTIFIED = CONF / "notified.json"
 LEVELS = (75, 90, 95)
 RUNS = CONF / "runs"
 PENDING = CONF / "pending-logins.json"
-KEEP_DAYS = 35
+HEAT_DAYS = 182  # the heatmap's 26 weeks
+KEEP_DAYS = HEAT_DAYS + 8
 WEEK, FIVE_H = 7 * 86400, 5 * 3600
 # $ per million input tokens; output, cache writes and cache reads scale from it as in the public price list
 PRICE_IN = {"opus": 5.0, "fable": 5.0, "sonnet": 3.0, "haiku": 1.0}
@@ -771,8 +812,9 @@ def api_dollars(model, u):
 
 
 def scan_file(path, start):
-    """Usage and limit-hit records appended to one transcript since byte offset `start`."""
-    recs, hits = [], []
+    """Usage and limit-hit records appended to one transcript since byte offset `start`, and the first working
+    folder recorded there."""
+    recs, hits, cwd = [], [], ""
     with open(path, "rb") as fh:
         fh.seek(start)
         data = fh.read()
@@ -788,6 +830,7 @@ def scan_file(path, start):
         sid = rec.get("sessionId")
         if ts is None or not sid:
             continue
+        cwd = cwd or str(rec.get("cwd") or "")
         ep = {"claude-desktop": "d", "cli": "c"}.get(rec.get("entrypoint"), "")
         info = (rec.get("apiErrorParams") or {}).get("rate_limit_info")
         if rec.get("apiError") == "usage_limit_reached" and isinstance(info, dict) and info.get("resetsAt"):
@@ -797,14 +840,29 @@ def scan_file(path, start):
         u = msg.get("usage")
         if rec.get("type") == "assistant" and isinstance(u, dict) and msg.get("id") and msg.get("model") != "<synthetic>":
             recs.append([ts, sid, msg["id"], round(api_dollars(msg.get("model"), u), 6), ep])
-    return recs, hits, start + end
+    return recs, hits, start + end, cwd
+
+
+def project_of(folder, cwd):
+    """The project a transcript belongs to: the folder Claude Code was started in, which its projects/ folder
+    name encodes; a worktree counts as its repository. None when the working folder does not lead back to it."""
+    p = cwd.replace("\\", "/").rstrip("/")
+    while p and project_dir_name(p) != folder:
+        if "/" not in p:
+            return None
+        p = p.rsplit("/", 1)[0]
+    if not p:
+        return None
+    p = p.split("/.claude/worktrees/")[0]
+    name = p.rsplit("/", 1)[-1]
+    return p.rsplit("/", 2)[-2] if name.startswith("local_") and p.count("/") >= 2 else name  # a desktop session's notes
 
 
 def scan(roots):
     """Incrementally read transcripts under each root's projects/; cache per file by offset."""
     cache = load(CACHE) or {}
-    if cache.get("v") != 2:
-        cache = {"v": 2, "files": {}}
+    if cache.get("v") != 4:
+        cache = {"v": 4, "files": {}}
     files, cutoff, seen = cache["files"], time.time() - KEEP_DAYS * 86400, set()
     for root in roots:
         for p in (root / "projects").rglob("*.jsonl") if (root / "projects").is_dir() else []:
@@ -820,21 +878,35 @@ def scan(roots):
             if not c or c["size"] > st.st_size or c.get("ino") != st.st_ino:
                 c = files[key] = {"size": 0, "off": 0, "ino": st.st_ino, "recs": [], "hits": [], "root": str(root)}
             if st.st_size > c["off"]:
-                recs, hits, off = scan_file(p, c["off"])
+                recs, hits, off, cwd = scan_file(p, c["off"])
+                c["cwd"] = c.get("cwd") or cwd
                 c["recs"] += recs
                 c["hits"] += hits
                 c["off"], c["size"] = off, st.st_size
             c["recs"] = [r for r in c["recs"] if r[0] >= cutoff]
-    for key in [k for k in files if k not in seen]:
-        del files[key]
+    for key in [k for k in files if k not in seen]:  # deleted (Claude Code removes old transcripts) or too old
+        c = files[key]
+        c["recs"] = [r for r in c["recs"] if r[0] >= cutoff]
+        if not c["recs"] and all(h[3] < cutoff for h in c["hits"]):
+            del files[key]
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     CACHE.write_text(json.dumps(cache, separators=(",", ":")), encoding="utf-8")
+    found, known = {}, {}
+    for key, c in files.items():
+        folder = Path(key).relative_to(Path(c["root"]) / "projects").parts[0]
+        base = re.sub(r"--claude-worktrees-.*$", "", folder)
+        found[key] = (project_of(folder, c.get("cwd") or ""), base)
+        if found[key][0]:
+            known.setdefault(base, found[key][0])  # names sessions run from elsewhere, like a scratch folder
+    home = project_dir_name(HOME) + "-"
     recs, hits, dedup = [], [], set()
-    for c in files.values():
+    for key, c in files.items():
+        name, base = found[key]
+        proj = name or known.get(base) or (base[len(home):] if base.startswith(home) else base.lstrip("-"))
         for r in c["recs"]:
             if r[2] not in dedup:  # a reply is written once per content block, and resumed sessions copy history
                 dedup.add(r[2])
-                recs.append(r + [c["root"]])
+                recs.append(r + [proj, c["root"]])
         hits += [h + [c["root"]] for h in c["hits"]]
     return recs, hits
 
@@ -1302,7 +1374,7 @@ def usage_report(extra_cfgs=(), now=None):
 
     by = {}
     for r in recs:
-        by.setdefault(who(r[0], r[1], r[4], r[5]), {"recs": [], "hits": []})["recs"].append(r)
+        by.setdefault(who(r[0], r[1], r[4], r[6]), {"recs": [], "hits": []})["recs"].append(r)
     for h in hits:
         by.setdefault(who(h[0], h[1], h[4], h[5]), {"recs": [], "hits": []})["hits"].append(h)
     official = load(LIMITS) or {}
@@ -1346,8 +1418,40 @@ def usage_report(extra_cfgs=(), now=None):
     free = [r for r in rows if not r["cool"]]
     pick = min(free, key=rank_key) if free else None
     first_back = min(rows, key=lambda r: r["cool"]["until"]) if rows and not free else None
-    return {"now": now, "rows": rows, "pick": pick, "first_back": first_back,
+    return {"now": now, "rows": rows, "pick": pick, "first_back": first_back, "heat": heat_data(by, rows, now),
             "unmapped_usd": sum(r[3] for r in unmapped["recs"] if r[0] >= now - WEEK) if unmapped else 0}
+
+
+def heat_data(by, rows, now):
+    """The heatmap: use per account per day over HEAT_DAYS, the average use per hour of the week, and the projects
+    behind each day. Accounts are keyed by id; '' holds CLI use no account could be matched to."""
+    end = datetime.fromtimestamp(now).date().toordinal()
+    start = end - HEAT_DAYS + 1
+    keys = [r["acct"] for r in rows] + ([""] if by.get(None) else [])
+    cal = {k: [0.0] * HEAT_DAYS for k in keys}
+    hours = {k: [0.0] * 168 for k in keys}
+    proj = [{} for _ in range(HEAT_DAYS)]
+    first = HEAT_DAYS
+    for acct, b in by.items():
+        k = acct or ""
+        for r in b["recs"] if k in cal else ():
+            lt = datetime.fromtimestamp(r[0])
+            i = lt.date().toordinal() - start
+            if not 0 <= i < HEAT_DAYS:
+                continue
+            first = min(first, i)
+            cal[k][i] += r[3]
+            hours[k][lt.weekday() * 24 + lt.hour] += r[3]
+            p = proj[i].setdefault(r[5] or "?", {})
+            p[k] = p.get(k, 0) + r[3]
+    weeks = max(1, (HEAT_DAYS - first) / 7)  # average over the weeks that have data, not the whole window
+    top = lambda d: dict(sorted(d.items(), key=lambda x: -sum(x[1].values()))[:8])
+    nm = {r["acct"]: r["name"] for r in rows}
+    return {"start": datetime.fromordinal(start).strftime("%Y-%m-%d"),
+            "accts": [{"k": k, "name": nm.get(k) or t("u_cli_head")} for k in keys],
+            "cal": {k: [round(v, 2) for v in vs] for k, vs in cal.items()},
+            "hours": {k: [round(v / weeks, 3) for v in vs] for k, vs in hours.items()},
+            "proj": [{p: {k: round(v, 2) for k, v in d.items()} for p, d in top(day).items()} for day in proj]}
 
 
 def rank_key(r):
@@ -1398,147 +1502,679 @@ def cmd_usage(args):
             open_path(out)
 
 
-def render_html(rep, live=None):
+ICONS = {  # 24x24 stroked paths for the page's buttons
+    "term": '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"/>',
+    "phone": '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+    "copy": '<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
+    "copyrc": '<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/><path d="M13.5 12.5h1M13 16.5h2" stroke-width="2.2"/>',
+    "pen": '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
+    "refresh": '<path d="M20 11a8 8 0 0 0-14.5-4.5L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4.5L20 16"/><path d="M20 20v-4h-4"/>',
+    "move": '<path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/>',
+    "desk": '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    "loop": '<path d="M17 3l3.5 3.5L17 10"/><path d="M3.5 12V9.5a3 3 0 0 1 3-3h14"/><path d="M7 21l-3.5-3.5L7 14"/><path d="M20.5 12v2.5a3 3 0 0 1-3 3h-14"/>',
+    "layers": '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+    "pick": '<rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M7.5 9l1.5 1.5L12 7.5M7.5 15l1.5 1.5 3-3M14.5 9.5h2.5M14.5 15.5h2.5"/>',
+    "undo": '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+    "list": '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="2.6"/>',
+    "import": '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 7v6M9.5 10.5L12 13l2.5-2.5"/>',
+    "pulse": '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
+    "bell": '<path d="M6 9a6 6 0 0 1 12 0c0 6.5 2.5 8 2.5 8h-17S6 15.5 6 9"/><path d="M10.2 20.5a2 2 0 0 0 3.6 0"/>',
+    "update": '<path d="M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5M5 20.5h14"/>',
+    "adduser": '<circle cx="10" cy="8" r="4"/><path d="M3 20.5a7 7 0 0 1 14 0"/><path d="M19 7.5v6M16 10.5h6"/>',
+    "rec": '<rect x="3" y="15" width="18" height="5" rx="1.5"/><path d="M6 11.5l3-3 3 2 5-5.5"/>',
+    "clock": '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    "check": '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    "q": '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2-2.4 3.5M12 17h.01"/>',
+    "info": '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.5h.01"/>',
+    "flame": '<path d="M12 21a6.5 6.5 0 0 0 6.5-6.5c0-4-3-6-4-9.5-2 1.5-3 3.5-3 5.5-1-1-1.5-2-1.5-3.5-2.5 2-4.5 4.5-4.5 7.5A6.5 6.5 0 0 0 12 21z"/>',
+}
+
+
+def icon(name):
+    return f'<svg class="i" aria-hidden="true"><use href="#i-{name}"/></svg>'
+
+
+def tip(text):
     from html import escape
+    return escape(text).replace("\n", "&#10;")
+
+
+def look():
+    d = load(LOOK)
+    a = d.get("accent") if isinstance(d, dict) else None
+    return {"accent": a if isinstance(a, (int, float)) and 0 <= a <= 2 else 1.0}
+
+
+def short_clock(ts, now):
+    """22:10 today, Thu 22:10 within the week, 10-30 22:10 after that."""
+    lt = time.localtime(ts)
+    if ts - now < 20 * 3600:
+        return time.strftime("%H:%M", lt)
+    if ts - now < 6 * 86400:
+        return t("pp_wdfmt", d=t("pp_wd").split(",")[lt.tm_wday]) + time.strftime(" %H:%M", lt)
+    return time.strftime("%m-%d %H:%M", lt)
+
+
+def card_html(r, rep, live):
+    """One account: a shader orb rising behind frosted glass, its color set by the tightest official limit."""
+    from html import escape as E
     now = rep["now"]
-    peak = max([max(r["daily"]) for r in rep["rows"]] + [1])
-    days = [time.strftime("%m-%d", time.localtime(now - i * 86400)) for i in range(6, -1, -1)]
-    cards = []
-    for r in rep["rows"]:
-        state = "cool" if r["cool"] else ("pick" if rep["pick"] is r else "ok")
-        badge = {"cool": t("u_tag_cool"), "pick": t("u_tag_pick"), "ok": t("u_ok").strip()}[state]
-        cool = ""
-        if r["cool"]:
-            k = t("u_kind_week") if r["cool"]["kind"] == "seven_day" else t("u_kind_5h")
-            cool = f'<p class="coolline">{escape(t("u_back", k=k, w=clock(r["cool"]["until"])))}</p>'
-        week_label = t("u_week") if r["week_reset"] else t("u_7d")
-        nums = (f'<div class="nums"><div><b>${r["week_usd"]:,.0f}</b><span>{escape(week_label)}</span></div>'
-                f'<div><b>${r["five_usd"]:,.0f}</b><span>{escape(t("u_5h"))}</span></div></div>')
-        meters = ""
-        off = r["official"]
-        if off:
-            for row in off["rows"]:
-                pc = row.get("percent") or 0
-                when_ = f' title="{escape(clock(row["resets_at"]))}"' if row.get("resets_at") else ""
-                meters += (f'<div class="m"{when_}><span>{escape(row_label(row))}</span><div class="bar">'
-                           f'<i class="{"hot" if pc >= 80 else ""}" style="width:{min(100, pc)}%"></i></div><b>{pc:.0f}%</b></div>')
-            meters = (f'<div class="official"><p>{escape(t("u_off_head", a=ago(now - off["at"])))}</p>{meters}</div>')
-        bars = "".join(
-            f'<div class="day" title="{days[i]} ${v:,.0f}"><i style="height:{max(2, 100 * v / peak):.0f}%"></i>'
-            f'<span>{days[i][3:]}</span></div>' for i, v in enumerate(r["daily"]))
-        foot = f'<p class="foot">{escape(t("u_reset", w=clock(r["week_reset"])))}</p>' if r["week_reset"] else ""
-        plan = f' <small class="plan">{escape(r["plan"])}</small>' if r["plan"] else ""
-        if live:
-            a_ = escape(r["acct"])
-            tools = f'<button class="ghost" data-rename="{a_}">{escape(t("pt_rename"))}</button>'
-            if r["cli"]:
-                on = recorder_on(Path(r["cfg"]))
-                tools += (f'<button class="ghost" data-term="{a_}">{escape(t("p_term"))}</button>'
-                          f'<button class="ghost" data-term="{a_}" data-rc="1">{escape(t("p_term_rc"))}</button>'
-                          f'<button class="ghost" data-copy="{escape(r["cli"])}">{escape(t("p_copy"))}</button>'
-                          f'<button class="ghost" data-copy="{escape(r["cli_rc"])}">{escape(t("p_copy_rc"))}</button>'
-                          f'<button class="ghost" data-rec="{a_}" data-on="{1 if on else 0}">'
-                          f'{escape(t("pt_rec_off" if on else "pt_rec_on"))}</button>')
-            else:
-                tools += f'<button class="ghost" data-login="{a_}">{escape(t("pt_login"))}</button>'
-            foot += f'<div class="tools">{tools}</div>'
-        cards.append(f'<section class="card {state}"><header><h2>{escape(r["name"])}{plan}</h2>'
-                     f'<span class="badge">{escape(badge)}</span></header>{cool}{nums}{meters}'
-                     f'<div class="days">{bars}</div>{foot}</section>')
-    if rep["unmapped_usd"] >= 1:
-        cards.append(f'<section class="card muted"><header><h2>{escape(t("u_cli_head"))}</h2></header>'
-                     f'<div class="nums"><div><b>${rep["unmapped_usd"]:,.0f}</b><span>{escape(t("u_7d"))}</span></div></div>'
-                     f'<p class="foot">{escape(t("u_unmapped"))}</p></section>')
-    if rep["pick"]:
-        pick = t("u_pick", a=rep["pick"]["name"])
-    elif rep["first_back"]:
-        pick = t("u_pick_none", a=rep["first_back"]["name"], w=clock(rep["first_back"]["cool"]["until"]))
+    off = r["official"]
+    rows = off["rows"] if off else []
+    sel = max(range(len(rows)), key=lambda i: rows[i].get("percent") or 0) if rows else -1
+    cool = r["cool"]
+    kind = (t("u_kind_week") if cool["kind"] == "seven_day" else t("u_kind_5h")) if cool else ""
+    attrs = f'data-acct="{E(r["acct"])}" data-name="{E(r["name"])}"'
+    if cool:
+        attrs += (f' data-until="{int(cool["until"])}" data-back="{E(short_clock(cool["until"], now))}"'
+                  f' data-back-text="{E(t("pp_back", k=kind))}"')
+    pct = round(rows[sel].get("percent") or 0) if rows else None
+    when_ = ""
+    if cool and (pct is None or pct >= 100):
+        heat = 100
+        big = f'<div class="big time">{E(short_clock(cool["until"], now))}</div>'
+        what = t("pp_back", k=kind)
+    elif rows:
+        heat = pct
+        big = f'<div class="big">{pct}<sup>%</sup></div>'
+        reset = rows[sel].get("resets_at")
+        what = t("pp_used", k=row_label(rows[sel]))
+        when_ = t("pp_resets", w=short_clock(reset, now)) if reset else ""
     else:
-        pick = ""
+        heat = ""
+        big = '<div class="big q">—</div>'
+        what = t("pp_none")
+    if cool:
+        chip = (f'<span class="chip hot" data-until="{int(cool["until"])}" data-tip="{tip(t("u_back", k=kind, w=clock(cool["until"])))}">'
+                f'{icon("clock")}<span></span></span>')
+    elif rows:
+        chip = f'<span class="chip ok" data-tip="{tip(t("u_ok").strip() + chr(10) + t("u_off_head", a=ago(now - off["at"])))}">{icon("check")}</span>'
+    else:
+        chip = f'<span class="chip unk" data-tip="{tip(t("pp_nooff"))}">{icon("q")}</span>'
+    pills = "".join(
+        f'<button type="button" data-p="{round(x.get("percent") or 0)}" data-k="{E(row_label(x))}" '
+        f'data-reset="{E(short_clock(x["resets_at"], now)) if x.get("resets_at") else ""}" '
+        f'aria-pressed="{"true" if i == sel else "false"}" data-tip="{tip(t("u_pct", k=row_label(x), p=round(x.get("percent") or 0)) + (chr(10) + t("pp_resets", w=clock(x["resets_at"])) if x.get("resets_at") else ""))}">'
+        f'{E(row_label(x))} {round(x.get("percent") or 0)}%</button>' for i, x in enumerate(rows))
+    days = [time.strftime("%m-%d", time.localtime(now - i * 86400)) for i in range(6, -1, -1)]
+    peak = max(r["daily"] + [0.01])
+    week_label = t("u_week") if r["week_reset"] else t("u_7d")
+    spend = (f'<div class="spend" data-tip="{tip(t("u_spent", k=week_label, d=r["week_usd"]) + chr(10) + t("u_spent", k=t("u_5h"), d=r["five_usd"]))}">'
+             f'<div class="bars">' + "".join(f'<i style="height:{max(8, 100 * v / peak):.0f}%"></i>' for v in r["daily"]) +
+             f'</div>${r["week_usd"]:,.0f}</div>')
+    acts = ""
+    if live:
+        a = E(r["acct"])
+        if r["cli"]:
+            on = recorder_on(Path(r["cfg"]))
+            acts += (f'<button class="ib" type="button" data-term="{a}" data-tip="{tip(t("p_term"))}">{icon("term")}</button>'
+                     f'<button class="ib" type="button" data-term="{a}" data-rc="1" data-tip="{tip(t("p_term_rc"))}">{icon("phone")}</button>'
+                     f'<button class="ib" type="button" data-copy="{E(r["cli"])}" data-tip="{tip(t("p_copy"))}">{icon("copy")}</button>'
+                     f'<button class="ib" type="button" data-copy="{E(r["cli_rc"])}" data-tip="{tip(t("p_copy_rc"))}">{icon("copyrc")}</button>'
+                     f'<button class="ib" type="button" data-rec="{a}" data-on="{1 if on else 0}" aria-pressed="{"true" if on else "false"}" '
+                     f'data-tip="{tip(t("pt_rec_off" if on else "pt_rec_on"))}">{icon("rec")}</button>')
+        else:
+            acts += f'<button class="ib" type="button" data-login="{a}" data-tip="{tip(t("pt_login"))}">{icon("adduser")}</button>'
+        acts += f'<button class="ib" type="button" data-rename="{a}" data-tip="{tip(t("pt_rename"))}">{icon("pen")}</button>'
+    plan = E(r["plan"]) if r["plan"] else "&nbsp;"
+    return (f'<article class="card" {attrs} data-heat="{heat}"><div class="sky"><canvas class="orb" aria-hidden="true"></canvas>'
+            f'<div class="head"><div><div class="name">{E(r["name"])}<span class="deskmark" hidden data-tip="{tip(t("pp_desk"))}">{icon("desk")}</span></div>'
+            f'<div class="plan">{plan}</div></div>{chip}</div></div>'
+            f'<div class="glass"><div class="hero"><div>{big}<div class="what">{E(what)}</div><div class="when"><span class="rs">{E(when_)}</span></div></div>{spend}</div>'
+            + (f'<div class="pills" role="group">{pills}</div>' if pills else "")
+            + (f'<div class="acts">{acts}</div>' if acts else "") + '</div></article>')
+
+
+def render_html(rep, live=None):
+    from html import escape as E
+    now = rep["now"]
+    cards = [card_html(r, rep, live) for r in rep["rows"]]
+    if rep["unmapped_usd"] >= 1:
+        cards.append(f'<article class="card" data-acct="" data-name="{E(t("u_cli_head"))}" data-heat=""><div class="sky">'
+                     f'<canvas class="orb" aria-hidden="true"></canvas><div class="head"><div><div class="name">{E(t("u_cli_head"))}</div>'
+                     f'<div class="plan">&nbsp;</div></div></div></div><div class="glass"><div class="hero"><div>'
+                     f'<div class="big">${rep["unmapped_usd"]:,.0f}</div><div class="what">{E(t("u_7d"))}</div></div></div>'
+                     f'<div class="acts"><span class="src" data-tip="{tip(t("u_unmapped"))}">{icon("info")}</span></div></div></article>')
+    advice = ""
+    if rep["pick"]:
+        p = rep["pick"]
+        pct = max([x.get("percent") or 0 for x in (p["official"] or {}).get("rows", [])], default=None)
+        advice = (f'<span class="advice" data-tip="{tip(t("u_pick", a=p["name"]))}"><span class="dot" data-heat="{"" if pct is None else round(pct)}"></span>'
+                  f'{E(t("pp_pick", a=p["name"]))}</span>')
+    elif rep["first_back"]:
+        f = rep["first_back"]
+        advice = (f'<span class="advice" data-tip="{tip(t("u_pick_none", a=f["name"], w=clock(f["cool"]["until"])))}">'
+                  f'<span class="dot" data-heat="100"></span>{E(f["name"])} {E(short_clock(f["cool"]["until"], now))}</span>')
+    refresh = (f'<button class="ib raised" type="button" id="refresh" data-tip="{tip(t("p_refresh") + chr(10) + t("pp_refresh"))}">{icon("refresh")}</button>'
+               if live else "")
+    ramp = (f'<span data-tip="{tip(t("pp_legend_tip"))}">{E(t("pp_legend"))}</span><span class="ramp" id="ramp" aria-hidden="true">'
+            + "".join(f'<b{" class=up" if i == len(LEVELS) - 1 else ""} style="left:{v}%">{v}</b>' for i, v in enumerate(LEVELS))
+            + f'</span><span class="grey" aria-hidden="true"></span><span>{E(t("pp_none"))}</span>')
+    if live:
+        ramp += (f'<label data-tip="{tip(t("pp_accent_tip"))}">{E(t("pp_accent"))} <input type="range" id="accent" min="0" max="200" '
+                 f'value="{round(look()["accent"] * 100)}"></label>')
+        dock = [("t-move", "pick", "pp_d_move", "pt_move"), ("t-undo", "undo", "pp_d_undo", "pt_undo"),
+                ("t-sess", "list", "pp_d_sess", "pt_sessions"), ("t-imp", "import", "pp_d_imp", "pt_import"),
+                ("t-runs", "loop", "pp_d_runs", "pt_runs"), ("t-doc", "pulse", "pp_d_doc", "pt_doctor"),
+                ("t-notify", "bell", "pp_d_notify", "pt_notify"), ("", "adduser", "pp_d_login", "pt_login_new"),
+                ("t-upd", "update", "pp_d_upd", "pt_update")]
+        tools = "".join(f'<button class="tool" type="button" {f"data-open={q}" if q else "id=dock-login"} aria-pressed="false" '
+                        f'data-tip="{tip(t(k2))}">{icon(ic)}{E(t(k))}</button>' for q, ic, k, k2 in dock)
+        bottom = f'<section class="panel dock"><div class="tools">{tools}</div><div class="legend">{ramp}</div>{tools_html()}</section>'
+    else:
+        bottom = f'<section class="panel dock"><div class="legend">{ramp}</div></section>'
+    heat = f'''<section class="panel heat" aria-label="{E(t("pp_heat"))}"><div class="hhead">
+<h2 data-tip="{tip(t("pp_heat_tip"))}">{icon("flame")}{E(t("pp_heat"))}</h2><span class="total" id="h-total"></span>
+<span class="seg" id="h-acct" role="group"></span><span class="scale" aria-hidden="true">{E(t("pp_less"))}<i data-l="0"></i><i data-l="1"></i><i data-l="2"></i><i data-l="3"></i><i data-l="4"></i>{E(t("pp_more"))}</span></div>
+<div class="maps"><div><p class="cap" data-tip="{tip(t("pp_cal_tip"))}">{E(t("pp_cal"))}</p><div class="hm" id="h-cal"></div></div>
+<div><p class="cap" id="h-hcap" data-tip="{tip(t("pp_hours_tip"))}"></p><div class="hm" id="h-hour"></div></div></div>
+<div class="dayinfo" id="h-day" hidden></div></section>'''
+    data = {"heat": rep.get("heat"), "accent": look()["accent"], "pick": rep["pick"]["acct"] if rep["pick"] else "",
+            "T": {k: t(k) for k in ("pp_used", "pp_resets", "pp_idle", "pp_avg", "pp_hours", "pp_cal", "pp_all_accts",
+                                    "pp_wd", "pp_wdfmt", "pp_months")}}
+    blob = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    sprite = ('<svg width="0" height="0" style="position:absolute" aria-hidden="true">'
+              + "".join(f'<symbol id="i-{k}" viewBox="0 0 24 24">{v}</symbol>' for k, v in ICONS.items()) + "</svg>")
     return f"""<!doctype html><html lang="{'zh' if ZH else 'en'}"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>claude-move usage</title><style>
-:root{{--bg:#f5f6f8;--card:#fff;--ink:#1c2230;--dim:#6a7284;--line:#e4e7ed;--ok:#23955f;--cool:#d64545;--bar:#b8c2d4;--off:#3274e8}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#10141b;--card:#19202a;--ink:#e9edf4;--dim:#8f99aa;--line:#28303d;--bar:#4a5568;--ok:#3fbf83;--cool:#ef6b6b;--off:#5b93f5}}}}
-*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}}
-main{{max-width:1040px;margin:0 auto;padding:28px 16px 40px}} h1{{font-size:22px;margin:0}} .sub{{color:var(--dim);font-size:13px;margin:4px 0 20px}}
-.advice{{font-weight:600;margin:0 0 16px;color:var(--ok)}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}}
-.card{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}} .card.pick{{border:2px solid var(--ok)}} .card.cool{{border-color:var(--cool)}} .card.muted{{opacity:.8}}
-header{{display:flex;justify-content:space-between;align-items:center;gap:8px}} h2{{margin:0;font-size:18px}} .plan{{font-size:12px;font-weight:600;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:2px}}
-.badge{{font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}}
-.cool .badge{{background:color-mix(in srgb,var(--cool) 14%,transparent);color:var(--cool)}} .coolline{{color:var(--cool);font-weight:600;margin:10px 0 0}}
-.nums{{display:flex;gap:28px;margin:14px 0 6px}} .nums b{{display:block;font-size:26px;font-variant-numeric:tabular-nums;letter-spacing:-.5px}} .nums span{{color:var(--dim);font-size:12px}}
-.official{{margin:10px 0 4px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--off) 8%,transparent)}} .official p{{margin:0 0 4px;font-size:12px;color:var(--dim)}}
-.m{{display:grid;grid-template-columns:84px 1fr 44px;gap:8px;align-items:center;font-size:13px;margin:4px 0}} .bar{{height:8px;background:var(--line);border-radius:4px;overflow:hidden}}
-.bar i{{display:block;height:100%;background:var(--off)}} .bar i.hot{{background:var(--cool)}} .m b{{text-align:right;font-variant-numeric:tabular-nums}}
-.days{{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;height:76px;margin-top:12px;align-items:end}}
-.day{{height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}} .day i{{width:100%;max-width:26px;background:var(--bar);border-radius:4px 4px 2px 2px}}
-.day span{{font-size:10px;color:var(--dim)}} .foot{{color:var(--dim);font-size:12px;margin:10px 0 0}}
-.notes{{color:var(--dim);font-size:12px;margin-top:22px}}
-.live{{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin:0 0 16px}}
-.live h3{{margin:0 0 6px;font-size:16px}} .live ol{{margin:6px 0 10px;padding-left:20px;color:var(--dim);font-size:13px}}
-.live .row{{display:flex;gap:10px;align-items:center;flex-wrap:wrap}} .live label{{font-size:13px;color:var(--dim)}}
-button{{font:inherit;font-size:14px;font-weight:600;border-radius:10px;padding:8px 14px;border:0;cursor:pointer;background:var(--ok);color:#fff}}
-button:disabled{{opacity:.45;cursor:default}} button.ghost{{background:transparent;color:var(--dim);border:1px solid var(--line);font-size:12px;padding:4px 10px;margin-top:10px}}
-.tools{{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}} .tools button.ghost{{margin-top:0}}
-{TOOLS_CSS if live else ""}
-pre.log{{white-space:pre-wrap;font-size:12px;background:var(--bg);border-radius:10px;padding:10px;margin:10px 0 0;max-height:240px;overflow:auto}}
-</style></head><body><main><h1>{escape(t("u_head"))}</h1><p class="sub">{escape(clock(now))} · claude-move {__version__}</p>
-<p class="advice">{escape(pick)}</p>{live_bar(live)}<div class="grid">{"".join(cards)}</div>{tools_html() if live else ""}
-<p class="notes">{escape(t("u_title"))}<br>{escape(t("u_notes"))}</p></main>{live_script(live)}</body></html>"""
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Claude Move</title><link rel="icon" id="favicon" href="data:,">
+<style>{PANEL_CSS}{TOOLS_CSS if live else ""}</style></head><body>{sprite}<div id="tip" role="tooltip"></div><main>
+<div class="top"><div><h1>Claude Move <span class="info" data-tip="{tip(t("u_title") + chr(10) + chr(10) + t("u_notes"))}">{icon("info")}</span></h1>
+<div class="sub">{E(t("u_head"))} · {E(clock(now))} · {__version__}</div></div><div class="topr">{advice}{refresh}</div></div>
+{live_bar(live)}<div class="grid">{"".join(cards)}</div>{heat}{bottom}</main>
+<script>{PANEL_JS.replace("__DATA__", blob)}</script>{live_script(live)}</body></html>"""
 
 
 def live_bar(live):
     if not live:
         return ""
-    from html import escape
-    return f'''<section class="live" id="live"><h3 id="signed">…</h3><ol><li>{escape(t("p_step1"))}</li><li>{escape(t("p_step2"))}</li></ol>
-<div class="row"><button id="go" disabled>…</button><label><input type="checkbox" id="all"> {escape(t("p_all"))}</label>
-<button class="ghost" id="refresh">{escape(t("p_refresh"))}</button></div>
-<div class="row"><label><input type="checkbox" id="auto"> {escape(t("p_auto"))}</label></div><pre class="log" id="log" hidden></pre></section>'''
+    from html import escape as E
+    return f'''<section class="panel move" id="live">
+<div class="who" id="who">{icon("desk")}<span id="signed">…</span><small id="from"></small></div><span class="sp"></span>
+<button class="tog" type="button" id="auto" aria-pressed="false" data-tip="{tip(t("p_auto"))}">{icon("loop")}{E(t("pp_auto"))}</button>
+<button class="tog" type="button" id="all" aria-pressed="false" data-tip="{tip(t("p_all"))}">{icon("layers")}{E(t("pp_all"))}</button>
+<button class="go" type="button" id="go" disabled>{icon("move")}<b id="gotext">…</b></button>
+<pre class="log" id="log" hidden></pre></section>'''
 
 
 def live_script(live):
     if not live:
         return ""
-    texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm", "p_term_done")}
+    texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm",
+                               "p_term_done", "p_step1", "p_step2", "pp_last")}
     return f"""<script>
 const T = {json.dumps(texts, ensure_ascii=False)}, KEY = {json.dumps(live["token"])};
 const fmt = (s, o) => s.replace(/\\{{(\\w+)\\}}/g, (_, k) => o[k] ?? "");
 const api = (path, body) => fetch(path, {{method: body ? "POST" : "GET", headers: {{"X-Token": KEY, "Content-Type": "application/json"}},
   body: body ? JSON.stringify(body) : undefined}}).then(r => r.json());
+const byId = id => document.getElementById(id);
+const pressed = id => byId(id).getAttribute("aria-pressed") === "true";
+const flash = (b, text) => {{
+  const old = b.dataset.tip; b.dataset.tip = text; b.classList.add("done"); CM.tip(b);
+  setTimeout(() => {{ b.dataset.tip = old; b.classList.remove("done"); }}, 1600);
+}};
+const showLog = text => {{ const log = byId("log"); log.hidden = false; log.textContent = text; }};
 let state = null;
 async function poll() {{
   try {{ state = await api("/state"); }} catch (e) {{ return; }}
-  const go = document.getElementById("go");
-  document.getElementById("signed").textContent = state.signed ? fmt(T.p_signed, {{a: state.signed.name}}) : T.p_unknown;
+  const go = byId("go");
+  byId("signed").textContent = state.signed ? state.signed.name : "?";
+  byId("who").dataset.tip = (state.signed ? fmt(T.p_signed, {{a: state.signed.name}}) : T.p_unknown) + "\\n" + T.p_step1;
+  byId("from").textContent = state.source ? fmt(T.pp_last, {{a: state.source.name}}) : "";
   if (state.signed && state.source) {{
-    go.textContent = fmt(T.p_go, {{s: state.source.name, a: state.signed.name}}); go.disabled = !!state.busy;
-  }} else {{ go.textContent = T.p_go_same; go.disabled = true; }}
+    byId("gotext").textContent = state.source.name + " → " + state.signed.name;
+    go.dataset.tip = fmt(T.p_go, {{s: state.source.name, a: state.signed.name}}) + "\\n" + T.p_step2;
+    go.disabled = !!state.busy;
+  }} else {{ byId("gotext").textContent = T.p_go_same; go.dataset.tip = T.p_step1; go.disabled = true; }}
+  CM.desk(state.signed && state.signed.acct);
 }}
-document.getElementById("go").onclick = async () => {{
+byId("go").onclick = async () => {{
   if (!state || !state.signed || !confirm(fmt(T.p_confirm, {{a: state.signed.name}}))) return;
-  const log = document.getElementById("log"); log.hidden = false; log.textContent = T.p_working;
-  document.getElementById("go").disabled = true;
-  const r = await api("/switch", {{to: state.signed.acct, all: document.getElementById("all").checked}});
-  log.textContent = r.log; if (r.ok) setTimeout(() => location.reload(), 4000);
+  showLog(T.p_working);
+  byId("go").disabled = true;
+  const r = await api("/switch", {{to: state.signed.acct, all: pressed("all")}});
+  showLog(r.log); if (r.ok) setTimeout(() => location.reload(), 4000);
 }};
-document.getElementById("refresh").onclick = async () => {{
-  const log = document.getElementById("log"); log.hidden = false; log.textContent = T.p_working;
-  const r = await api("/refresh", {{}}); log.textContent = r.log; setTimeout(() => location.reload(), 1200);
+byId("refresh").onclick = async () => {{
+  showLog(T.p_working); byId("refresh").classList.add("spin");
+  const r = await api("/refresh", {{}}); showLog(r.log); setTimeout(() => location.reload(), 1200);
 }};
 document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () =>
-  navigator.clipboard.writeText(b.dataset.copy).then(() => {{ b.textContent = T.p_copied; }}));
+  navigator.clipboard.writeText(b.dataset.copy).then(() => flash(b, T.p_copied)));
 document.querySelectorAll("[data-term]").forEach(b => b.onclick = async () => {{
-  const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc, auto: document.getElementById("auto").checked}});
-  if (r.ok) b.textContent = T.p_term_done; else {{ const log = document.getElementById("log"); log.hidden = false; log.textContent = r.log; }}
+  const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc, auto: pressed("auto")}});
+  if (r.ok) flash(b, T.p_term_done); else showLog(r.log);
 }});
-const auto = document.getElementById("auto");
-try {{ auto.checked = localStorage.getItem("auto") === "1"; }} catch (e) {{}}
-auto.onchange = () => {{ try {{ localStorage.setItem("auto", auto.checked ? "1" : "0"); }} catch (e) {{}} }};
+const setPressed = (id, on) => byId(id).setAttribute("aria-pressed", on ? "true" : "false");
+try {{ setPressed("auto", localStorage.getItem("auto") === "1"); }} catch (e) {{}}
+byId("auto").onclick = () => {{ setPressed("auto", !pressed("auto")); try {{ localStorage.setItem("auto", pressed("auto") ? "1" : "0"); }} catch (e) {{}} }};
+byId("all").onclick = () => setPressed("all", !pressed("all"));
+CM.saveAccent = v => api("/api/look", {{accent: v}});
+const syncDock = () => document.querySelectorAll("[data-open]").forEach(b =>
+  b.setAttribute("aria-pressed", byId(b.dataset.open).open ? "true" : "false"));
+document.querySelectorAll("[data-open]").forEach(b => b.onclick = () => {{
+  const d = byId(b.dataset.open), on = !d.open;
+  document.querySelectorAll(".toolbox details").forEach(x => {{ x.open = false; }});
+  d.open = on;
+  if (on) setTimeout(() => d.scrollIntoView({{block: "nearest", behavior: "smooth"}}), 30);
+}});
+document.querySelectorAll(".toolbox details").forEach(d => d.addEventListener("toggle", syncDock));
 poll(); setInterval(poll, 3000);
 {tools_js()}
+byId("dock-login").onclick = () => login({{}});
+syncDock();
 </script>"""
+
+
+PANEL_CSS = r"""
+:root{
+  --bg:#eceef2; --dot:#d3d8e0; --card:#fbfcfd; --raise:#ffffff; --ink:#151922; --dim:#687183; --hair:rgba(22,32,52,.09);
+  --glass:rgba(251,252,253,.6); --btn:#111317; --btnink:#ffffff; --ok:#2c8657; --hot:#cf3426;
+  --cell:#e3e7ee; --heat:#24395e; --tip:#111317; --tipink:#f3f5f8; --line:var(--hair); --cool:var(--hot);
+  --lift:0 1px 0 rgba(255,255,255,.9) inset,0 22px 44px -22px rgba(28,38,60,.28),0 2px 8px rgba(28,38,60,.06);
+  --pill:0 1px 0 rgba(255,255,255,.9) inset,0 4px 10px -4px rgba(28,38,60,.25),0 0 0 1px rgba(22,32,52,.06);
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI Variable Display","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0d0f13; --dot:#1b1f27; --card:#15181e; --raise:#232831; --ink:#eef1f6; --dim:#8a93a4; --hair:rgba(255,255,255,.07);
+  --glass:rgba(21,24,30,.55); --btn:#f1f3f6; --btnink:#0d0f13; --ok:#4cc38a; --hot:#ff6b57;
+  --cell:#1e232c; --heat:#cbd8f0; --tip:#f1f3f6; --tipink:#0d0f13;
+  --lift:0 1px 0 rgba(255,255,255,.05) inset,0 24px 48px -20px rgba(0,0,0,.7);
+  --pill:0 1px 0 rgba(255,255,255,.08) inset,0 4px 12px -4px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06);
+  color-scheme:dark}}
+*{box-sizing:border-box} [hidden]{display:none!important}
+body{margin:0;background:var(--bg) radial-gradient(var(--dot) 1.1px,transparent 1.5px) 0 0/18px 18px;color:var(--ink);font:14px/1.5 var(--sans);padding:28px 16px 48px}
+main{max-width:1120px;margin:0 auto;display:grid;gap:20px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #4a78c2;outline-offset:2px}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.panel{background:var(--card);border-radius:24px;box-shadow:var(--lift)}
+.ib{background:none;border:0;border-radius:11px;width:34px;height:34px;display:inline-grid;place-items:center;color:var(--dim);padding:0}
+.ib:hover,.ib[aria-pressed="true"]{background:var(--hair);color:var(--ink)}
+.ib.raised{background:var(--raise);box-shadow:var(--pill);color:var(--ink)}
+.ib.done{color:var(--ok)} .ib.spin svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--tip);color:var(--tipink);font-size:12px;line-height:1.45;padding:6px 10px;border-radius:9px;
+  max-width:300px;box-shadow:0 8px 20px -8px rgba(0,0,0,.5);opacity:0;transform:translateY(3px);transition:opacity .12s,transform .12s;white-space:pre-line;left:0;top:0}
+#tip.on{opacity:1;transform:none}
+.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+h1{font:600 24px/1.1 var(--display);letter-spacing:-.4px;margin:0;display:flex;gap:8px;align-items:center}
+h1 .info{color:var(--dim);display:inline-flex}
+.sub{color:var(--dim);font:12px var(--mono);margin-top:5px}
+.topr{display:flex;gap:10px;align-items:center}
+.advice{display:inline-flex;gap:8px;align-items:center;font-size:13px;font-weight:600}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#a0a6b0;flex:none}
+.move{padding:12px 12px 12px 20px;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+.who{display:flex;align-items:center;gap:10px;font-weight:600;min-width:0}
+.who small{color:var(--dim);font-weight:500;font-size:12px}
+.sp{flex:1}
+.tog{display:inline-flex;gap:6px;align-items:center;border:0;border-radius:11px;padding:7px 11px;font-size:13px;background:none;color:var(--dim)}
+.tog[aria-pressed="true"]{background:var(--raise);box-shadow:var(--pill);color:var(--ink);font-weight:600}
+.go{background:var(--btn);color:var(--btnink);border:0;border-radius:15px;padding:11px 16px;font-weight:600;font-size:14px;display:flex;gap:9px;align-items:center;
+  box-shadow:0 10px 22px -10px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.18) inset}
+.go b{font:600 14px var(--sans)}
+pre.log{flex-basis:100%;white-space:pre-wrap;font:12px/1.5 var(--mono);background:var(--bg);border-radius:12px;padding:10px 12px;margin:0;max-height:240px;overflow:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(244px,1fr));gap:16px}
+.card{position:relative;background:var(--card);border-radius:28px;box-shadow:var(--lift);overflow:hidden;isolation:isolate;min-width:0}
+.sky{height:186px;position:relative}
+.orb{position:absolute;width:min(224px,84%);height:auto;aspect-ratio:1/1;left:50%;top:186px;transform:translate(-50%,-50%);z-index:0}
+.orb.flat{border-radius:50%}
+.head{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:18px 18px 0}
+.name{font:600 20px/1.2 var(--display);letter-spacing:-.2px;display:flex;gap:7px;align-items:center;overflow-wrap:anywhere}
+.name svg{width:16px;height:16px;color:var(--dim)}
+.plan{color:var(--dim);font-size:12px;margin-top:2px}
+.chip{display:inline-flex;gap:5px;align-items:center;background:var(--raise);box-shadow:var(--pill);border-radius:10px;padding:4px 9px;font:600 12px var(--mono);white-space:nowrap}
+.chip svg{width:14px;height:14px}
+.chip.hot{color:var(--hot)} .chip.ok{color:var(--ok)} .chip.unk{color:var(--dim)}
+.glass{position:relative;z-index:1;background:var(--glass);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);
+  border-top:1px solid var(--hair);padding:16px 16px 12px;display:grid;gap:12px}
+.hero{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;min-height:84px}
+.big{font:300 58px/.95 var(--display);letter-spacing:-2.5px;font-variant-numeric:tabular-nums}
+.big sup{font-size:22px;letter-spacing:0;vertical-align:30px;margin-left:2px;font-weight:400}
+.big.time{font-size:46px;letter-spacing:-1.5px} .big.q{font-size:46px;color:var(--dim)}
+.what{font-size:12px;font-weight:600;margin-top:7px;color:var(--dim)}
+.when{font:11px var(--mono);color:var(--dim);min-height:16px}
+.spend{text-align:right;font:600 13px var(--mono)}
+.bars{display:flex;gap:3px;align-items:flex-end;height:30px;justify-content:flex-end;margin-bottom:5px}
+.bars i{width:7px;border-radius:2px;background:var(--dim);opacity:.35} .bars i:last-child{opacity:.85}
+.pills{display:flex;gap:2px;flex-wrap:wrap}
+.pills button{background:none;border:0;border-radius:10px;padding:4px 7px;font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pills button[aria-pressed="true"]{background:var(--raise);box-shadow:var(--pill);color:var(--ink);font-weight:600}
+.acts{display:flex;align-items:center;gap:0;border-top:1px solid var(--hair);padding-top:6px;min-height:41px;flex-wrap:wrap}
+.acts .src{margin-left:auto;color:var(--dim);display:inline-flex}
+.heat{padding:18px 20px 16px;display:grid;gap:14px}
+.hhead{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.hhead h2{margin:0;font:600 15px var(--display);display:flex;gap:8px;align-items:center}
+.total{font:300 30px/1 var(--display);letter-spacing:-.8px;font-variant-numeric:tabular-nums}
+.seg{display:inline-flex;flex-wrap:wrap;background:var(--hair);border-radius:11px;padding:3px;gap:2px}
+.seg button{border:0;background:none;border-radius:8px;padding:4px 10px;font-size:12px;color:var(--dim)}
+.seg button[aria-pressed="true"]{background:var(--raise);box-shadow:var(--pill);color:var(--ink);font-weight:600}
+.maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px 36px}
+.cap{font:11px var(--mono);color:var(--dim);margin:0 0 6px 22px}
+.hm{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 8px;font:10px var(--mono);color:var(--dim)}
+.cols,.cells{display:grid;gap:3px}
+.cols span{white-space:nowrap}
+.rows{display:grid;grid-template-rows:repeat(7,1fr);gap:3px}
+.rows span{display:flex;align-items:center;justify-content:flex-end}
+.cells i,.scale i{display:block;aspect-ratio:1;border-radius:3px;background:var(--cell)}
+.cells i.x{background:none}
+[data-l="1"]{background:color-mix(in srgb,var(--heat) 22%,var(--cell))!important}
+[data-l="2"]{background:color-mix(in srgb,var(--heat) 45%,var(--cell))!important}
+[data-l="3"]{background:color-mix(in srgb,var(--heat) 70%,var(--cell))!important}
+[data-l="4"]{background:var(--heat)!important}
+.cells i[data-day]{cursor:pointer}
+.cells i:hover,.cells i.sel{outline:2px solid var(--ink);outline-offset:1px}
+.scale{display:flex;gap:3px;align-items:center;font:10px var(--mono);color:var(--dim);margin-left:auto}
+.scale i{width:11px;height:11px}
+.dayinfo{border-top:1px solid var(--hair);padding-top:12px;display:grid;gap:4px;font-size:13px}
+.dayinfo b{font:600 13px var(--mono)}
+.dayinfo .pr{display:flex;gap:10px;align-items:baseline}
+.dayinfo .pr span{flex:1;min-width:0;overflow-wrap:anywhere} .dayinfo .pr small{color:var(--dim);font-size:11px}
+.dock .tools{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;padding:8px}
+.tool{display:grid;justify-items:center;gap:4px;background:none;border:0;border-radius:16px;padding:10px 6px 8px;width:76px;font-size:11px;color:var(--dim)}
+.tool svg{width:22px;height:22px;color:var(--ink)}
+.tool:hover,.tool[aria-pressed="true"]{background:var(--raise);box-shadow:var(--pill);color:var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;color:var(--dim);font-size:12px;justify-content:center;padding:12px 16px 14px}
+.tools+.legend{border-top:1px solid var(--hair);margin:0 16px;padding-inline:0}
+.ramp{position:relative;width:min(320px,70vw);height:8px;border-radius:99px;margin-block:14px;background:var(--cell)}
+.ramp b{position:absolute;top:11px;transform:translateX(-50%);font:600 9px var(--mono);color:var(--dim)}
+.ramp b::before{content:"";position:absolute;left:50%;top:-12px;width:1px;height:10px;background:var(--ink);opacity:.35}
+.ramp b.up{top:-15px} .ramp b.up::before{top:12px}
+.grey{width:8px;height:8px;border-radius:50%;background:#a0a6b0}
+.legend label{display:flex;gap:6px;align-items:center}
+.legend input{width:110px;margin:0}
+@media (max-width:640px){.go{width:100%;justify-content:center}.sp{display:none}}
+@media (prefers-reduced-motion:reduce){#tip{transition:none}.ib.spin svg{animation:none}}
+"""
+
+PANEL_JS = r"""(() => {
+const D = __DATA__, S = D.T;
+const fmt = (s, o) => s.replace(/\{(\w+)\}/g, (_, k) => o[k] ?? "");
+
+/* one floating label for every [data-tip] */
+const tipEl = document.getElementById("tip");
+let tipFor = null;
+function showTip(el) {
+  tipFor = el; tipEl.textContent = el.dataset.tip; tipEl.classList.add("on");
+  const r = el.getBoundingClientRect(), t = tipEl.getBoundingClientRect();
+  let y = r.top - t.height - 8;
+  if (y < 6) y = r.bottom + 8;
+  tipEl.style.left = Math.max(8, Math.min(innerWidth - t.width - 8, r.left + r.width / 2 - t.width / 2)) + "px";
+  tipEl.style.top = y + "px";
+}
+const hideTip = () => { tipFor = null; tipEl.classList.remove("on"); };
+document.addEventListener("pointerover", e => { const el = e.target.closest("[data-tip]"); el ? el !== tipFor && showTip(el) : hideTip(); });
+document.addEventListener("focusin", e => { const el = e.target.closest("[data-tip]"); el ? showTip(el) : hideTip(); });
+document.addEventListener("focusout", hideTip);
+addEventListener("scroll", hideTip, {passive: true});
+
+/* colors by % used, stops at the notification levels; each: deep, mid, light, a neighbouring hue, a glow.
+   Blends follow the hue circle in OKLab, so the color moves visibly with every few percent and never turns grey. */
+const STOPS = [
+  [0,   ["#173a9e", "#2a6fe0", "#b6d6ff", "#3fb8f5", "#d6ecff"]],
+  [25,  ["#0f4f9c", "#2b93e6", "#c2e8ff", "#22c7d6", "#d8f7ff"]],
+  [50,  ["#0b6168", "#14a89a", "#c5f1e2", "#3bc46e", "#dcffe9"]],
+  [75,  ["#b44a0a", "#f5901f", "#ffe0a0", "#ffc93a", "#fff1c4"]],
+  [90,  ["#b02a10", "#f2551f", "#ffb98a", "#ff9a2a", "#ffe0a8"]],
+  [95,  ["#a8161b", "#e8352a", "#ffa98a", "#ff7a2a", "#ffd2a0"]],
+  [100, ["#7e0d16", "#cf1f24", "#ff9478", "#ff6a2a", "#ffc58f"]],
+];
+const GREY = ["#6b7380", "#a3abb6", "#eef1f5", "#c4d2e2", "#ffffff"];
+const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+const lin = v => Math.pow(v, 2.2), gam = v => Math.pow(Math.min(1, Math.max(0, v)), 1 / 2.2);
+function toLab(c) {
+  const [r, g, b] = c.map(lin);
+  const l = Math.cbrt(.4122214708 * r + .5363325363 * g + .0514459929 * b), m = Math.cbrt(.2119034982 * r + .6806995451 * g + .1073969566 * b),
+        s = Math.cbrt(.0883024619 * r + .2817188376 * g + .6299787005 * b);
+  return [.2104542553 * l + .793617785 * m - .0040720468 * s, 1.9779984951 * l - 2.428592205 * m + .4505937099 * s, .0259040371 * l + .7827717662 * m - .808675766 * s];
+}
+function fromLab([L, a, b]) {
+  const l = (L + .3963377774 * a + .2158037573 * b) ** 3, m = (L - .1055613458 * a - .0638541728 * b) ** 3, s = (L - .0894841775 * a - 1.291485548 * b) ** 3;
+  return [gam(4.0767416621 * l - 3.3077115913 * m + .2309699292 * s), gam(-1.2684380046 * l + 2.6097574011 * m - .3413193965 * s), gam(-.0041960863 * l - .7034186147 * m + 1.707614701 * s)];
+}
+const LABS = STOPS.map(([p, cs]) => [p, cs.map(c => toLab(rgb(c)))]), GREYLAB = GREY.map(c => toLab(rgb(c)));
+function mixHue(x, y, f) {
+  const c1 = Math.hypot(x[1], x[2]), c2 = Math.hypot(y[1], y[2]);
+  let h1 = Math.atan2(x[2], x[1]), h2 = Math.atan2(y[2], y[1]), dh = h2 - h1;
+  if (dh > Math.PI) dh -= 2 * Math.PI; else if (dh < -Math.PI) dh += 2 * Math.PI;
+  const h = c1 < .02 ? h2 : c2 < .02 ? h1 : h1 + dh * f, c = c1 + (c2 - c1) * f;
+  return [x[0] + (y[0] - x[0]) * f, c * Math.cos(h), c * Math.sin(h)];
+}
+function palette(p) {
+  if (p == null || p === "" || isNaN(p)) return GREYLAB;
+  p = Math.min(100, Math.max(0, +p));
+  let i = 0;
+  while (i < LABS.length - 2 && p > LABS[i + 1][0]) i++;
+  const [p0, a] = LABS[i], [p1, b] = LABS[i + 1];
+  return a.map((c, j) => mixHue(c, b[j], (p - p0) / (p1 - p0)));
+}
+const hex = lab => "#" + fromLab(lab).map(v => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
+
+/* the orb: a slowly flowing ink inside a disc, lit from the top left */
+const VS = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
+const FS = `precision mediump float;
+uniform vec2 R;uniform float T;uniform float K;uniform vec3 P[5];
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+  return mix(mix(h(i),h(i+vec2(1.,0.)),f.x),mix(h(i+vec2(0.,1.)),h(i+vec2(1.,1.)),f.x),f.y);}
+float fbm(vec2 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*n(p);p=p*2.03+vec2(1.7,9.2);a*=.5;}return v;}
+vec3 rgbOf(vec3 c){
+  float l=c.x+.3963377774*c.y+.2158037573*c.z,m=c.x-.1055613458*c.y-.0638541728*c.z,s=c.x-.0894841775*c.y-1.291485548*c.z;
+  l=l*l*l;m=m*m*m;s=s*s*s;
+  vec3 v=vec3(4.0767416621*l-3.3077115913*m+.2309699292*s,-1.2684380046*l+2.6097574011*m-.3413193965*s,-.0041960863*l-.7034186147*m+1.707614701*s);
+  return pow(clamp(v,0.,1.),vec3(1./2.2));
+}
+void main(){
+  vec2 p=gl_FragCoord.xy/R*2.-1.;
+  float d=length(p),px=2./R.x;
+  float m=1.-smoothstep(.95-px*1.5,.95+px*1.5,d);
+  vec2 q=p*.85;
+  vec2 w1=vec2(fbm(q+vec2(0.,T*.05)),fbm(q+vec2(5.2,1.3)-vec2(T*.04,0.)));
+  vec2 w2=vec2(fbm(q*1.2+2.2*w1+vec2(1.7,9.2)+T*.03),fbm(q*1.2+2.2*w1+vec2(8.3,2.8)-T*.025));
+  float f=fbm(q*1.1+2.*w2);
+  float g=clamp(f*1.15-.02-p.y*.15-p.x*.22,0.,1.);
+  vec3 lab=g<.5?mix(P[0],P[1],smoothstep(0.,.5,g)):mix(P[1],P[2],smoothstep(.5,1.,g));
+  lab=mix(lab,P[3],smoothstep(.45,.8,w2.x)*min(1.,.7*K));
+  vec3 nr=vec3(p,sqrt(max(0.,1.-d*d)));
+  float lit=dot(nr,normalize(vec3(-.5,.6,.7)));
+  lab.x+=.07*lit-.02;
+  lab.x=mix(lab.x,P[2].x,smoothstep(.72,.95,d)*.25);
+  vec3 col=rgbOf(lab);
+  col=1.-(1.-col)*(1.-rgbOf(P[4])*smoothstep(.55,.88,w1.y)*min(1.,.5*K));
+  col+=rgbOf(P[4])*pow(max(0.,lit),18.)*.14;
+  gl_FragColor=vec4(clamp(col,0.,1.)*m,m);
+}`;
+const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let ACC = D.accent;
+function makeOrb(canvas) {
+  const gl = canvas.getContext("webgl", {premultipliedAlpha: true, antialias: false});
+  if (!gl) return null;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) return null;
+  gl.useProgram(pr);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr, "a");
+  gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const u = k => gl.getUniformLocation(pr, k);
+  const size = Math.max(64, Math.round(canvas.clientWidth * Math.min(2, devicePixelRatio || 1)));
+  canvas.width = canvas.height = size;
+  gl.viewport(0, 0, size, size);
+  return {gl, R: u("R"), T: u("T"), P: u("P"), K: u("K"), size, seed: Math.random() * 100, p: null, want: null, visible: true};
+}
+function draw(o, t) {
+  const {gl} = o;
+  if (o.p !== null && o.want !== null) o.p += (o.want - o.p) * .08;
+  gl.uniform2f(o.R, o.size, o.size); gl.uniform1f(o.T, o.seed + t); gl.uniform1f(o.K, ACC);
+  gl.uniform3fv(o.P, palette(o.p).flat());
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+const cards = [...document.querySelectorAll(".card")].map((el, i) => {
+  const c = {el, canvas: el.querySelector("canvas.orb")};
+  c.orb = i < 12 ? makeOrb(c.canvas) : null;  // browsers allow only so many WebGL contexts
+  if (!c.orb) c.canvas.classList.add("flat");
+  return c;
+});
+function paint(c) {
+  const v = c.el.dataset.heat, want = v === "" || v == null ? null : +v, o = c.orb, pal = palette(want);
+  if (o) { if (o.p === null || want === null || still) o.p = want; o.want = want; draw(o, performance.now() / 1000); }
+  else c.canvas.style.background = `radial-gradient(circle at 35% 70%, ${hex(pal[2])}, ${hex(pal[1])} 45%, ${hex(pal[0])} 95%)`;
+}
+function pick(c, b) {
+  const el = c.el, big = el.querySelector(".big"), what = el.querySelector(".what"), when = el.querySelector(".when"), p = +b.dataset.p;
+  el.querySelectorAll(".pills button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  if (el.dataset.until && p >= 100) {
+    big.className = "big time"; big.textContent = el.dataset.back; what.textContent = el.dataset.backText; when.querySelector(".rs").textContent = ""; el.dataset.heat = 100;
+  } else {
+    big.className = "big"; big.innerHTML = p + "<sup>%</sup>";
+    what.textContent = fmt(S.pp_used, {k: b.dataset.k});
+    when.querySelector(".rs").textContent = b.dataset.reset ? fmt(S.pp_resets, {w: b.dataset.reset}) : "";
+    el.dataset.heat = p;
+  }
+  paint(c); tab();
+}
+cards.forEach(c => { c.el.querySelectorAll(".pills button").forEach(b => b.onclick = () => pick(c, b)); paint(c); });
+document.querySelectorAll(".dot[data-heat]").forEach(d => { d.style.background = hex(palette(d.dataset.heat)[1]); });
+const ramp = document.getElementById("ramp");
+if (ramp) ramp.style.background = "linear-gradient(90deg," + Array.from({length: 21}, (_, i) => `${hex(palette(i * 5)[1])} ${i * 5}%`).join(",") + ")";
+
+/* cooling chips count down */
+function countdown() {
+  document.querySelectorAll(".chip[data-until]").forEach(ch => {
+    const s = Math.max(0, +ch.dataset.until - Date.now() / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+    ch.querySelector("span").textContent = h >= 48 ? Math.round(h / 24) + "d" : h + ":" + String(m).padStart(2, "0");
+  });
+}
+countdown(); setInterval(countdown, 30000);
+
+/* the tab shows the desktop app's account (else the suggested one): its ball as the icon, its number in the title */
+let tabAcct = D.pick;
+function tab() {
+  const card = cards.find(c => c.el.dataset.acct === tabAcct) || cards[0];
+  if (!card) return;
+  const big = card.el.querySelector(".big");
+  document.title = card.el.dataset.name + " · " + (big ? big.textContent : "") + " — Claude Move";
+  const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+  const x = cv.getContext("2d"), pal = palette(card.el.dataset.heat), g = x.createRadialGradient(24, 22, 4, 32, 32, 30);
+  g.addColorStop(0, hex(pal[2])); g.addColorStop(.5, hex(pal[1])); g.addColorStop(1, hex(pal[0]));
+  x.fillStyle = g; x.beginPath(); x.arc(32, 32, 29, 0, 7); x.fill();
+  document.getElementById("favicon").href = cv.toDataURL();
+}
+function desk(acct) {
+  document.querySelectorAll(".card").forEach(el => { const m = el.querySelector(".deskmark"); if (m) m.hidden = !acct || el.dataset.acct !== acct; });
+  if (acct && acct !== tabAcct) { tabAcct = acct; tab(); }
+}
+tab();
+
+/* accent strength */
+const acc = document.getElementById("accent");
+let saving = 0;
+if (acc) acc.oninput = () => {
+  ACC = acc.value / 100;
+  cards.forEach(c => c.orb && draw(c.orb, performance.now() / 1000));
+  clearTimeout(saving); saving = setTimeout(() => window.CM.saveAccent && window.CM.saveAccent(ACC), 400);
+};
+
+/* total use: the last 26 weeks by day, and the hours of the week */
+const H = D.heat;
+if (H) {
+  const WD = S.pp_wd.split(","), MON = S.pp_months.split(","), N = H.cal[Object.keys(H.cal)[0]]?.length || 0;
+  let who = "*";  // every account; "" is CLI use no account could be matched to
+  const keys = H.accts.map(a => a.k), name = k => (H.accts.find(a => a.k === k) || {}).name || k;
+  const all = () => who === "*";
+  const val = (arr, i) => !all() ? (arr[who] || [])[i] || 0 : keys.reduce((s, k) => s + ((arr[k] || [])[i] || 0), 0);
+  const money = x => "$" + (x >= 100 ? Math.round(x).toLocaleString() : x.toFixed(x < 10 ? 1 : 0));
+  const levels = vals => {
+    const nz = vals.filter(v => v > 0).sort((a, b) => a - b), q = f => nz[Math.floor(f * (nz.length - 1))] || 0, cut = [q(.25), q(.5), q(.75)];
+    return v => v <= 0 ? 0 : v <= cut[0] ? 1 : v <= cut[1] ? 2 : v <= cut[2] ? 3 : 4;
+  };
+  const split = by => !all() ? "" : "\n" + Object.entries(by).filter(x => x[1] >= .05).sort((a, b) => b[1] - a[1]).map(([k, v]) => name(k) + " " + money(v)).join(" · ");
+  const start = new Date(H.start + "T00:00:00"), off = (start.getDay() + 6) % 7, weeks = Math.ceil((off + N) / 7);
+  const dayOf = i => { const d = new Date(start); d.setDate(d.getDate() + i); return d; };
+  const label = d => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${fmt(S.pp_wdfmt, {d: WD[(d.getDay() + 6) % 7]})}`;
+  const rowsHtml = WD.map((w, i) => `<span>${i % 2 ? "" : w}</span>`).join("");
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+  function drawHeat() {
+    const vals = Array.from({length: N}, (_, i) => val(H.cal, i)), lv = levels(vals);
+    document.getElementById("h-total").textContent = money(vals.reduce((s, v) => s + v, 0));
+    let months = "";
+    for (let w = 0; w < weeks; w++) {
+      let m = "";
+      for (let j = Math.max(0, w * 7 - off); j <= Math.min(N - 1, w * 7 - off + 6); j++) if (dayOf(j).getDate() === 1) m = MON[dayOf(j).getMonth()];
+      if (w === 0 && !m && N && start.getDate() <= 18) m = MON[start.getMonth()];
+      months += `<span>${m}</span>`;
+    }
+    let cells = "";
+    for (let j = 0; j < weeks * 7; j++) {
+      const i = j - off;
+      if (i < 0 || i >= N) { cells += `<i class="x"></i>`; continue; }
+      const v = vals[i], by = {};
+      keys.forEach(k => { const x = (H.cal[k] || [])[i] || 0; if (x) by[k] = x; });
+      cells += `<i data-day="${i}" data-l="${lv(v)}" data-tip="${esc(label(dayOf(i)) + " · " + (v ? money(v) + split(by) : S.pp_idle))}"></i>`;
+    }
+    document.getElementById("h-cal").innerHTML = `<span></span><div class="cols" style="grid-template-columns:repeat(${weeks},1fr)">${months}</div>
+      <div class="rows">${rowsHtml}</div><div class="cells" style="grid-template-columns:repeat(${weeks},1fr);grid-template-rows:repeat(7,auto);grid-auto-flow:column">${cells}</div>`;
+    const hv = Array.from({length: 168}, (_, i) => val(H.hours, i)), hl = levels(hv);
+    document.getElementById("h-hcap").textContent = fmt(S.pp_hours, {d: money(hv.reduce((s, v) => s + v, 0))});
+    let hc = "";
+    for (let i = 0; i < 168; i++) {
+      const by = {};
+      keys.forEach(k => { const x = (H.hours[k] || [])[i] || 0; if (x) by[k] = x; });
+      const wd = Math.floor(i / 24), h = i % 24;
+      hc += `<i data-l="${hl(hv[i])}" data-tip="${esc(fmt(S.pp_wdfmt, {d: WD[wd]}) + ` ${h}:00–${h + 1}:00 · ` + fmt(S.pp_avg, {d: money(hv[i])}) + split(by))}"></i>`;
+    }
+    document.getElementById("h-hour").innerHTML = `<span></span><div class="cols" style="grid-template-columns:repeat(24,1fr)">${
+      Array.from({length: 24}, (_, h) => `<span>${h % 6 ? "" : h}</span>`).join("")}</div>
+      <div class="rows">${rowsHtml}</div><div class="cells" style="grid-template-columns:repeat(24,1fr)">${hc}</div>`;
+  }
+  function showDay(i) {
+    const box = document.getElementById("h-day"), pr = H.proj[i] || {};
+    const items = Object.entries(pr).map(([p, by]) => [p, by, !all() ? by[who] || 0 : Object.values(by).reduce((s, v) => s + v, 0)])
+      .filter(x => x[2] >= .01).sort((a, b) => b[2] - a[2]);
+    const total = val(H.cal, i);
+    box.hidden = false;
+    box.innerHTML = `<div class="pr"><span><b>${esc(label(dayOf(i)))}</b></span><b>${total ? money(total) : esc(S.pp_idle)}</b></div>` +
+      items.map(([p, by, v]) => `<div class="pr"><span>${esc(p)} ${!all() ? "" : `<small>${esc(Object.entries(by).sort((a, b) => b[1] - a[1])
+        .map(([k, x]) => name(k) + " " + money(x)).join(" · "))}</small>`}</span><b>${money(v)}</b></div>`).join("");
+    document.querySelectorAll("#h-cal .sel").forEach(x => x.classList.remove("sel"));
+    const cell = document.querySelector(`#h-cal [data-day="${i}"]`);
+    if (cell) cell.classList.add("sel");
+  }
+  let day = -1;
+  document.getElementById("h-cal").onclick = e => { const c = e.target.closest("[data-day]"); if (c) { day = +c.dataset.day; showDay(day); } };
+  const seg = document.getElementById("h-acct");
+  seg.innerHTML = [["*", S.pp_all_accts]].concat(H.accts.map(a => [a.k, a.name]))
+    .map(([k, n]) => `<button type="button" data-k="${esc(k)}" aria-pressed="${k === "*" ? "true" : "false"}">${esc(n)}</button>`).join("");
+  seg.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    who = b.dataset.k;
+    seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    drawHeat(); if (day >= 0) showDay(day);
+  };
+  if (H.accts.length < 2) seg.hidden = true;
+  drawHeat();
+}
+
+/* keep the orbs flowing while they are on screen */
+if (!still) {
+  const io = new IntersectionObserver(es => es.forEach(e => { const c = cards.find(c => c.canvas === e.target); if (c && c.orb) c.orb.visible = e.isIntersecting; }));
+  cards.forEach(c => io.observe(c.canvas));
+  let last = 0;
+  const loop = now => {
+    requestAnimationFrame(loop);
+    if (document.hidden || now - last < 33) return;  // about 30 frames a second is plenty for slow ink
+    last = now;
+    cards.forEach(c => c.orb && c.orb.visible && draw(c.orb, now / 1000));
+  };
+  requestAnimationFrame(loop);
+}
+window.CM = {tip: showTip, desk, tab};
+})();
+"""
 
 
 NO_WINDOW = 0x08000000  # Windows: CREATE_NO_WINDOW, so helper commands do not flash a console
@@ -2804,6 +3440,12 @@ def panel_api(method, path, q, body, extra=()):
             n += added
             lines.append(t("imp_add" if added else "imp_skip", i=sid, w=w, t=first_prompt(f)))
         return 200, {"ok": True, "log": "\n".join(lines + [t("imp_done", n=n) if lines else t("nothing")])}
+    if name == "look":
+        a = body.get("accent")
+        if not isinstance(a, (int, float)) or isinstance(a, bool) or not 0 <= a <= 2:
+            return bad
+        save_json(LOOK, {"accent": round(float(a), 2)})
+        return 200, {"ok": True}
     if name == "doctor":
         _, log = captured(lambda: refresh_official(extra))
         return 200, {"ok": True, "log": log, "items": doctor_items(extra)}
@@ -2811,15 +3453,18 @@ def panel_api(method, path, q, body, extra=()):
 
 
 TOOLS_CSS = """
-.toolbox{margin-top:18px;display:grid;gap:10px}
-.toolbox details{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px}
-.toolbox summary{cursor:pointer;font-weight:600}
+.toolbox details{border-top:1px solid var(--hair);margin:0 16px;padding:14px 0 16px}
+.toolbox details:not([open]){display:none}
+.toolbox summary{list-style:none;font:600 15px var(--display);pointer-events:none}
+.toolbox summary::-webkit-details-marker{display:none}
 .toolbox .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
-.toolbox select,.toolbox input[type=text]{font:inherit;font-size:13px;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);max-width:100%}
-.toolbox .ghost,.tools .ghost{margin-top:0}
+.toolbox select,.toolbox input[type=text]{font:inherit;font-size:13px;padding:6px 9px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--ink);max-width:100%}
+.toolbox button{font-size:13px;font-weight:600;border:0;border-radius:10px;padding:7px 12px;background:var(--btn);color:var(--btnink)}
+.toolbox button.ghost{background:var(--raise);color:var(--ink);box-shadow:var(--pill)}
+.toolbox pre.log{margin-top:10px}
 .list{max-height:340px;overflow:auto;margin:8px 0}
-.item{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
-.item:last-child{border-bottom:0} .item.warn{color:var(--cool)} .dim{color:var(--dim)} .sub-item{padding-left:18px;color:var(--dim)}
+.item{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;padding:6px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}
+.item:last-child{border-bottom:0} .item.warn{color:var(--hot)} .dim{color:var(--dim)} .sub-item{padding-left:18px;color:var(--dim)}
 """
 
 TOOLS_JS = r"""
