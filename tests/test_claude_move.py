@@ -404,6 +404,177 @@ class Usage(unittest.TestCase):
         self.assertIn("No CLI login", r.stderr)
 
 
+def usage_answer(session, week, opus, resets):
+    """What `claude -p /usage --output-format stream-json` prints: its usage_report, with a per-model meter."""
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(resets))
+    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "usage"}]},
+            "usage_report": {"session": {}, "rate_limits": {"limits": [
+                {"kind": "session", "group": "session", "percent": session, "resets_at": at},
+                {"kind": "weekly_all", "group": "weekly", "percent": week, "resets_at": at},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": opus, "resets_at": at,
+                 "scope": {"model": {"id": "claude-opus-5", "display_name": "Opus"}}}]}}}
+
+
+class Firstmate(unittest.TestCase):
+    """quota-snapshot writes official numbers in quota-axi's cache format; fm-pin sets which login firstmate's crews use."""
+    setUp, tearDown, run_tool = Usage.setUp, Usage.tearDown, Usage.run_tool
+
+    def prepare(self):
+        self.first, self.second = self.home / ".claude-first", self.home / ".claude-second"
+        for c, acct in ((self.first, self.a), (self.second, self.b)):
+            c.mkdir()
+            (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": acct}}))
+        self.fm = self.home / "firstmate"
+        (self.fm / "bin").mkdir(parents=True)
+        (self.fm / "bin/fm-spawn.sh").write_text("")
+        self.answers = self.home / "answers.json"
+        self.answer(self.second, usage_answer(12, 20, 33.5, self.now + 7200))
+        # a fake claude: each config folder answers /usage with what answers.json says for it, or is signed out
+        self.exe = stub(self.home / "claude", f"a = json.load(open({str(self.answers)!r})).get(os.environ.get('CLAUDE_CONFIG_DIR', ''))\n"
+                                              "print(json.dumps(a) if a else 'Not logged in · Please run /login')\n")
+        self.snap = self.home / ".cache/claude-move/quota-axi-snapshot.json"
+        self.pin = self.fm / "config/claude-account"
+        self.env = dict(CLAUDE_MOVE_CLAUDE=str(self.exe), CLAUDE_MOVE_FM_HOME=str(self.fm))
+        self.run_tool("name", "aaaa", "first")
+        self.run_tool("name", "bbbb", "second")
+
+    def answer(self, cfg, a):
+        cur = json.loads(self.answers.read_text(encoding="utf-8")) if self.answers.exists() else {}
+        cur[str(cfg)] = a
+        self.answers.write_text(json.dumps(cur), encoding="utf-8")
+
+    def test_snapshot_format_follows_the_pin(self):
+        self.prepare()
+        r = self.run_tool("quota-snapshot", **self.env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("fm-pin", r.stderr)  # nothing pinned and no --account: it does not guess
+        self.assertFalse(self.snap.exists())
+        r = self.run_tool("fm-pin", "second", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.pin.read_text(encoding="utf-8"), f"{self.second}\n")
+        self.assertIn("Crews started from now on use it", r.stdout)
+        at = json.loads((self.home / ".config/claude-move/limits.json").read_text(encoding="utf-8"))[self.b]["at"]
+        iso = lambda s: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(s))
+        resets = iso(int(self.now + 7200))
+        self.assertEqual(json.loads(self.snap.read_text(encoding="utf-8")), {"schemaVersion": 3, "providers": [{
+            "provider": "claude", "label": "Claude", "source": "cli", "windows": [
+                {"id": "five_hour", "label": "session", "kind": "session", "percentUsed": 12, "percentRemaining": 88,
+                 "resetsAt": resets, "windowSeconds": 18000},
+                {"id": "seven_day", "label": "week", "kind": "weekly", "percentUsed": 20, "percentRemaining": 80,
+                 "resetsAt": resets, "windowSeconds": 604800},
+                {"id": "model:claude-opus-5", "label": "Opus week", "kind": "model", "percentUsed": 33.5, "percentRemaining": 66.5,
+                 "resetsAt": resets, "windowSeconds": 604800}],
+            "state": {"status": "fresh", "stale": False, "sourcesTried": ["cli"], "refreshedAt": iso(at)}}]})
+        if not WIN:
+            self.assertEqual(self.snap.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(sorted(p.name for p in self.snap.parent.iterdir() if "quota-axi" in p.name), [self.snap.name])  # no temp left
+        log = (self.home / ".cache/claude-move/quota-snapshot.log").read_text(encoding="utf-8")
+        self.assertIn(f"second (bbbbbbbb) five_hour=12% seven_day=20% refreshedAt={iso(at)}", log)
+        # a refresh follows the pin, and names its account and both numbers
+        self.answer(self.second, usage_answer(15, 22, 34, self.now + 7200))
+        r = self.run_tool("quota-snapshot", "--refresh", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("second · 5h 15% · week 22%", r.stdout)
+        st = self.run_tool("quota-snapshot", "status", **self.env).stdout
+        self.assertIn(f"firstmate's crews: second (~/.claude-second)", st)
+        self.assertIn("Scheduled refresh: off", st)
+        # fm-pin without an account lists the logins, the pinned one marked
+        lines = self.run_tool("fm-pin", **self.env).stdout.splitlines()
+        self.assertTrue(any(ln.startswith("* second") for ln in lines), lines)
+        self.assertTrue(any(ln.startswith("  first") and "no official %" in ln for ln in lines), lines)
+
+    def test_no_data_keeps_the_old_file(self):
+        self.prepare()
+        self.snap.parent.mkdir(parents=True)
+        old = json.dumps({"schemaVersion": 3, "providers": [{"provider": "claude", "windows": [],
+                                                              "state": {"refreshedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.now - 60))}}]})
+        self.snap.write_text(old, encoding="utf-8")
+        r = self.run_tool("quota-snapshot", "--account", "first", "--refresh", **self.env)  # signed out: no plan usage
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("without plan usage", r.stdout)
+        self.assertEqual(self.snap.read_text(encoding="utf-8"), old)
+        # numbers an hour old while /usage keeps failing: firstmate gets no quota rather than old quota
+        limits = self.home / ".config/claude-move/limits.json"
+        limits.write_text(json.dumps({self.a: {"at": self.now - 7200, "src": "usage", "rows": [
+            {"kind": "weekly_all", "percent": 50, "resets_at": self.now + 86400}]}}))
+        self.snap.write_text(old.replace(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.now - 60)),
+                                         time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.now - 7200))), encoding="utf-8")
+        r = self.run_tool("quota-snapshot", "--account", "first", "--refresh", **self.env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(self.snap.exists())
+        self.assertTrue(self.snap.with_name(self.snap.name + ".stale").exists())
+        self.assertIn("moved to", r.stdout)
+
+    def test_fm_pin_checks_the_login(self):
+        self.prepare()
+        self.assertNotEqual(self.run_tool("fm-pin", "second", CLAUDE_MOVE_FM_HOME=str(self.home / "nope"), CLAUDE_MOVE_CLAUDE=str(self.exe)).returncode, 0)
+        r = self.run_tool("fm-pin", "first", **self.env)  # signed out
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(self.pin.exists())
+        self.answer(self.first, usage_answer(100, 40, 10, self.now + 3600))
+        r = self.run_tool("fm-pin", "first", **self.env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("cooling", r.stderr)
+        self.assertFalse(self.pin.exists())
+        self.assertEqual(self.run_tool("fm-pin", "first", "--force", **self.env).returncode, 0)
+        self.assertEqual(self.pin.read_text(encoding="utf-8"), f"{self.first}\n")
+        self.assertNotEqual(self.run_tool("fm-pin", "nobody", **self.env).returncode, 0)
+
+    def test_status_line_keeps_the_snapshot_fresh_and_hints_a_switch(self):
+        self.prepare()
+        self.assertEqual(self.run_tool("fm-pin", "second", **self.env).returncode, 0)
+        limits = self.home / ".config/claude-move/limits.json"
+        cur = json.loads(limits.read_text(encoding="utf-8"))
+        cur[self.a] = {"at": self.now, "src": "usage", "rows": [{"kind": "weekly_all", "percent": 30, "resets_at": self.now + 86400}]}
+        limits.write_text(json.dumps(cur))
+        conf = self.home / ".config/claude-move/snapshot.json"
+        c = json.loads(conf.read_text(encoding="utf-8"))
+        c["at"] = self.now - 120  # the last write was two minutes ago
+        conf.write_text(json.dumps(c))
+        sent = self.home / "sent"
+        line = json.dumps({"rate_limits": {"five_hour": {"used_percentage": 91, "resets_at": int(self.now + 3600)},
+                                           "seven_day": {"used_percentage": 25, "resets_at": int(self.now + 86400)}}})
+        r = self.run_tool("watch", "record", stdin=line, CLAUDE_CONFIG_DIR=str(self.second), CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent), **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        ws = {w["id"]: w["percentUsed"] for w in json.loads(self.snap.read_text(encoding="utf-8"))["providers"][0]["windows"]}
+        self.assertEqual(ws, {"five_hour": 91, "seven_day": 25, "model:claude-opus-5": 33.5})  # per-model meter kept from /usage
+        self.assertIn("first has 70% left this week: claude-move fm-pin first", sent.read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(sys.platform == "darwin", "a launchd agent")
+    def test_schedule_writes_a_launch_agent(self):
+        import plistlib
+        self.prepare()
+        agents = self.home / "agents"
+        env = dict(self.env, CLAUDE_MOVE_AGENTS=str(agents), CLAUDE_MOVE_LAUNCHCTL=NOOP)
+        r = self.run_tool("quota-snapshot", "schedule", "--every", "5", **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        p = plistlib.loads((agents / "com.github.layla-nl.claude-move.quota-snapshot.plist").read_bytes())
+        self.assertEqual(p["ProgramArguments"][-2:], ["quota-snapshot", "--refresh"])
+        self.assertEqual(p["StartInterval"], 300)
+        self.assertEqual(p["EnvironmentVariables"]["CLAUDE_MOVE_CLAUDE"], str(self.exe))
+        self.assertIn("every 5 min", self.run_tool("quota-snapshot", "status", **env).stdout)
+        self.run_tool("quota-snapshot", "unschedule", **env)
+        self.assertEqual(list(agents.iterdir()), [])
+
+    def test_panel_crew_tool(self):
+        self.prepare()
+        Panel.start(self, **self.env)
+        api = lambda name, body=None: json.loads(Panel.call(self, "/api/" + name, body)[1])
+        page = Panel.call(self, f"/?t={self.token}", token=False)[1]
+        self.assertIn("data-open=t-crew", page)
+        self.assertNotIn('class="crewmark"', page)
+        r = api("crew")
+        self.assertTrue(r["found"])
+        self.assertEqual({a["name"]: a["pinned"] for a in r["accounts"]}, {"first": False, "second": False})
+        self.assertFalse(api("crew", {"do": "pin", "acct": self.a})["ok"])  # signed out
+        self.assertEqual(Panel.call(self, "/api/crew", {"do": "pin", "acct": "nobody"})[0], 400)
+        self.assertTrue(api("crew", {"do": "pin", "acct": self.b})["ok"])
+        self.assertEqual(self.pin.read_text(encoding="utf-8"), f"{self.second}\n")
+        self.assertTrue(api("crew", {"do": "snapshot"})["ok"])
+        self.assertTrue(self.snap.exists())
+        self.assertIn('class="crewmark"', Panel.call(self, f"/?t={self.token}", token=False)[1])
+
+
 class Plan(unittest.TestCase):
     def test_plan_names(self):
         import importlib.machinery, importlib.util
@@ -420,7 +591,7 @@ class Panel(unittest.TestCase):
     """panel: token-gated local server; the switch button checks who is signed in, then quits, moves, reopens."""
     setUp, tearDown = Usage.setUp, Usage.tearDown
 
-    def start(self, *extra):
+    def start(self, *extra, **env_extra):
         import re
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
         env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
@@ -428,6 +599,7 @@ class Panel(unittest.TestCase):
                    CLAUDE_MOVE_QUIT_CMD=touch_cmd(self.home / "quit"), CLAUDE_MOVE_OPEN_CMD=touch_cmd(self.home / "open"),
                    CLAUDE_MOVE_TERM_CMD=touch_cmd(self.home / "term"),
                    CLAUDE_MOVE_UPDATE_URL=(self.home / "rel.json").as_uri(), CLAUDE_MOVE_NOTIFY_CMD=NOOP)
+        env.update(env_extra)
         self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open", *extra], stdout=subprocess.PIPE, text=True,
                                      encoding="utf-8", env=env)
         self.addCleanup(lambda: (self.proc.kill(), self.proc.wait(), self.proc.stdout.close()))
@@ -853,6 +1025,7 @@ class Windows(unittest.TestCase):
 
 class Help(unittest.TestCase):
     def test_every_help_renders(self):
-        for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["term"], ["run"], ["notify"], ["doctor"], ["watch"]):
+        for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["term"], ["run"], ["notify"], ["doctor"], ["watch"],
+                     ["quota-snapshot"], ["fm-pin"]):
             r = subprocess.run([sys.executable, str(TOOL), *args, "--help"], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, (args, r.stderr[-300:]))

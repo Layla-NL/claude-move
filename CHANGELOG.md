@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+- `quota-snapshot`: one account's official numbers in quota-axi's cache format (schema 3, one keyless Claude row: `five_hour`, `seven_day`, `model:<id>` weeks, `refreshedAt` when `/usage` answered), for firstmate's quota-axi through `QUOTA_AXI_SNAPSHOT`. Written atomically, mode 0600, logged in `~/.cache/claude-move/quota-snapshot.log`. Without official numbers it writes nothing and exits non-zero; when `/usage` keeps failing and the numbers are an hour old, the file is moved aside so firstmate sees no quota rather than old quota. `schedule` refreshes it every 10 minutes (a launchd agent on macOS, a scheduled task on Windows), asking the other logins' `/usage` once an hour; the status line recorder in the pinned login also rewrites it, at most once a minute.
+- `fm-pin [<account>]`: lists the CLI logins with their official numbers, or pins firstmate's Claude crews to one (`config/claude-account`) after checking it answers `/usage` and is not cooling; the snapshot follows the pin.
+- At 90 and 95%, the notification for the crews' account names the login with the most of this week left and its `fm-pin` command.
+- The panel has a firstmate crews tool (pin, snapshot, schedule, how it works) when firstmate is there, and an anchor on the card the crews use.
+- The status line recorder keeps the per-model weekly meters `/usage` gave (the status line has none), and `/usage` rows keep the model id.
+
 ## 0.6.1
 - A new default icon in the panel's look: a ball drawn by the panel's own shader, frosted glass over its lower half, and the move button.
 
