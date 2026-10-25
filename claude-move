@@ -4085,8 +4085,8 @@ def fm_pin(home=None):
         return None, None
     except (OSError, UnicodeDecodeError):
         return None, t("qs_badpin", f=short(f))
-    m = re.fullmatch(r"(ordinary|/[^\x00-\x1f\x7f]*)\n?", body)
-    if not m:
+    m = re.fullmatch(r"(ordinary|[^\x00-\x1f\x7f]+)\n?", body)  # firstmate's own rule, with this system's absolute paths
+    if not m or (m.group(1) != "ordinary" and not os.path.isabs(m.group(1))):
         return None, t("qs_badpin", f=short(f))
     return (HOME / ".claude" if m.group(1) == "ordinary" else Path(m.group(1))), None
 
