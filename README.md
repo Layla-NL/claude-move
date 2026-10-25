@@ -90,6 +90,8 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 | `claude-move notify on\|off\|status\|test [--levels 75,90,95]` | macOS notifications when an account's official % passes each level, once per reset window (on by default). Once a week, the first time the panel or `usage` reads your use, a summary of last week: total at API prices, the account that used most, the busiest day |
 | `claude-move doctor [--refresh]` | Check labels, CLI logins (and whether `/usage` answers in each), accounts that show up in two folders, desktop accounts without a CLI login, the status line recorder and the app's signature |
 | `claude-move watch install` / `uninstall` | Record the official 5-hour/weekly % each time the CLI status line refreshes; keeps your existing status line |
+| `claude-move fm-pin [<account>]` | For [firstmate](https://github.com/kunchenguid/firstmate): show which CLI login its Claude crews use, or pin them to one. It checks that login answers `/usage` and is not cooling (`--force` pins it anyway), writes firstmate's `config/claude-account`, and points the quota snapshot at it. Crews started after that use it; running ones stay where they are |
+| `claude-move quota-snapshot [--refresh] [--account A] [--out FILE]` | Write one account's official % in quota-axi's cache format, so firstmate's quota-axi reads it through `QUOTA_AXI_SNAPSHOT` without touching the login or the Keychain (see below). `schedule [--every 10]` / `unschedule`: refresh it every few minutes (launchd on macOS, Task Scheduler on Windows); `status` shows the pin, the file and the schedule |
 | `claude-move import-cli --config DIR [--project PATH] [--session ID] [--days N] [--dry-run]` | Copy CLI session transcripts from another config folder (e.g. a second account under `CLAUDE_CONFIG_DIR=~/.claude-work`) into `~/.claude`, so the desktop app can open them. Never overwrites. A project folder name that starts with `-` needs `--project=-Users-me-app` |
 
 `<account>` is a label, or the first few characters of the account id shown by `list`.
@@ -187,6 +189,9 @@ up. In the dock under the cards:
 - **Auto-continue sessions:** each `run` session, which account it is on now and when it switched.
 - **Check-up:** `doctor`, with a fix button where there is one, and a button to add another account's CLI login.
 - **Notifications:** on/off, levels, a test.
+- **firstmate crews** (when `~/Developer/firstmate` exists): which account the crews use, the snapshot and its
+  schedule, a "pin for crews" button per account and "refresh the snapshot now". The card the crews use has an
+  anchor next to its name.
 - **Updates:** asks GitHub for the latest release when you press it; nothing is downloaded.
 
 Every button is a fixed action, and every value the page sends (account, backup, session id, label, folder name)
@@ -210,6 +215,32 @@ accounts this way is allowed depends on Anthropic's terms for your plan, so chec
 Notifications (`claude-move notify`) fire when the official % updates: the status line recorder in each CLI login
 (`CLAUDE_CONFIG_DIR=~/.claude-work claude-move watch install`) or `usage --refresh`. `claude-move doctor` lists what
 is missing.
+
+### firstmate
+
+[firstmate](https://github.com/kunchenguid/firstmate) checks Claude quota with quota-axi before it starts work.
+Reading it itself, quota-axi needs the Keychain; given `QUOTA_AXI_SNAPSHOT=<file>` it reads only that file. claude-move
+writes that file from the official numbers it already has:
+
+```bash
+claude-move fm-pin outlook             # crews use ~/.claude-outlook; the snapshot follows
+claude-move quota-snapshot schedule    # refresh it every 10 minutes
+export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # in firstmate's start-up
+```
+
+- The file is quota-axi's cache format: one Claude row without an account key (the row firstmate binds Claude crews
+  to), windows `five_hour`, `seven_day` and `model:<id>` for per-model weeks, `refreshedAt` set to when `/usage`
+  answered. It is written to a temporary file and renamed, readable only by you.
+- The account is the one in firstmate's `config/claude-account`, so pin and snapshot cannot drift apart.
+- Freshness: each scheduled run asks that login's `/usage` (no quota used), and the other logins' once an hour. With
+  the status line recorder in that login, crews that are working update it too, at most once a minute. quota-axi
+  treats a snapshot as current until a window resets, so if `/usage` keeps failing for an hour (signed out, asleep
+  too long) the file is moved aside to `….stale`: firstmate then sees no Claude quota instead of old quota. Without
+  official numbers nothing is written and the command exits non-zero.
+- Each write is logged in `~/.cache/claude-move/quota-snapshot.log` (account, both percentages, `refreshedAt`).
+- Switching stays yours: at 90 and 95% the notification for the crews' account names the login with the most of this
+  week left and the `fm-pin` command for it. Nothing switches crews on its own: firstmate leaves that file to its
+  captain, and rotating accounts automatically is the kind of use Anthropic's terms may not allow.
 
 ## What it does not do
 
@@ -280,6 +311,8 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 - `notify on|off|status|test [--levels 75,90,95]`：某个号的官方百分比过 75/90/95% 时弹系统通知，每个重置周期每档只提醒一次（默认开）。每周第一次打开面板或运行 `usage` 时，还会发一条上周小结：按 API 价总共用了多少、哪个号用得最多、哪天最忙。
 - `doctor [--refresh]`：自检：名字、各命令行登录（以及 `/usage` 能不能用）、同一个号出现在两个目录、有桌面会话却没有命令行登录的号、状态栏记录器、小 App 的签名。
 - `watch install` / `watch uninstall`：装上（或卸掉）状态栏记录器，用命令行版时记下官方百分比。
+- `fm-pin [<账号>]`：给 [firstmate](https://github.com/kunchenguid/firstmate) 用。不带账号时列出各命令行登录的官方额度、船员现在用哪个；带账号时先确认这个登录 `/usage` 能回、没在冷却（`--force` 照样钉），写 firstmate 的 `config/claude-account`，快照也跟着换到这个号。之后新起的船员用它，已经在跑的不变。
+- `quota-snapshot [--refresh] [--account 账号] [--out 文件]`：把一个号的官方百分比写成 quota-axi 的缓存格式，firstmate 的 quota-axi 通过 `QUOTA_AXI_SNAPSHOT` 读它，不碰登录和钥匙串（见下面）。`schedule [--every 10]` / `unschedule` 定时刷新（macOS 用 launchd，Windows 用任务计划程序）；`status` 看钉的号、文件和定时。
 
 **额度面板：** `claude-move usage` 把几个号放在一起看，告诉你该换到哪个：
 - 冷却和恢复时间：撞到 5 小时或每周上限时，Claude Code 会把官方提示和恢复时间写进会话记录，面板读的就是它，所以能看到“每周额度用完，10-24 10:00 恢复”，以及每周几点重置。
@@ -316,11 +349,26 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 - **自动续接的会话：** 每个 `run` 会话现在在哪个号、什么时候换过。
 - **诊断：** 就是 `doctor`，能修的旁边有修复按钮；还有“添加另一个账号的命令行登录”。
 - **通知：** 开关、阈值、测试通知。
+- **firstmate 船员**（有 `~/Developer/firstmate` 时出现）：船员用哪个号、快照和定时刷新，每个号一个“钉给船员”按钮，还有“现在刷新快照”。船员在用的那张卡片，名字旁边有个锚。
 - **检查更新：** 你点了才去 GitHub 看最新发布，不下载任何东西。
 
 每个按钮都只做固定的事，页面发来的每个值（账号、备份、会话 id、名字、目录名）都先和本机实际有的对一遍。
 
 **通知和自检：** 官方百分比一更新就检查要不要通知，来源是各命令行登录里的状态栏记录器（`CLAUDE_CONFIG_DIR=~/.claude-work claude-move watch install`）或 `usage --refresh`。`claude-move doctor` 会列出还缺什么。
+
+**firstmate：** firstmate 派活前用 quota-axi 看 Claude 额度。quota-axi 自己读要钥匙串授权；给它 `QUOTA_AXI_SNAPSHOT=<文件>` 就只读这个文件。claude-move 用已有的官方数据写这个文件：
+
+```bash
+claude-move fm-pin outlook             # 船员用 ~/.claude-outlook，快照跟着它
+claude-move quota-snapshot schedule    # 每 10 分钟刷新一次
+export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # 写进 firstmate 的启动脚本
+```
+
+- 文件是 quota-axi 的缓存格式：一条不带账号 key 的 Claude 记录（firstmate 给 Claude 船员绑的就是这一行），窗口是 `five_hour`、`seven_day`，按模型的周额度是 `model:<id>`，`refreshedAt` 是 `/usage` 回答的时间。先写临时文件再改名，只有你自己能读。
+- 写哪个号看 firstmate 的 `config/claude-account`，钉的号和快照不会对不上。
+- 保鲜：定时任务每次问这个登录的 `/usage`（不耗额度），别的登录每小时问一次。这个登录装了状态栏记录器的话，船员干活时也会顺手更新，最多一分钟一次。quota-axi 在窗口重置前都把快照当新的用，所以 `/usage` 连续失败一小时（退出登录、电脑睡太久），文件会挪成 `….stale`：firstmate 看到的是“没有 Claude 额度数据”，而不是旧数。没有官方数据时什么都不写，命令非零退出。
+- 每次写入记在 `~/.cache/claude-move/quota-snapshot.log`（账号、两个百分比、`refreshedAt`）。
+- 换号还是你来：船员用的号过 90%、95% 时，通知会写出本周剩得最多的号和对应的 `fm-pin` 命令。不会自动给船员换号：firstmate 规定这个文件只由船长改，而且自动轮换几个号，Anthropic 的条款未必允许。
 
 **不做的事：** 不搬 artifact、项目这类存在 claude.ai 上的东西（它们跟着创建它的账号走）；从不读、不用登录凭据（`usage` 只读会话记录、账号 id 和桌面 App 日志里写着当前账号的那几行；`watch install` 只在你运行时改 `settings.json`，`watch uninstall` 会把原来的状态栏放回去）；会话里点过的“这次允许”不会带过去。
 

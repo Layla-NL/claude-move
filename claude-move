@@ -24,6 +24,8 @@ Usage:
   claude-move panel [--port N] [--idle SECONDS]
   claude-move app install|uninstall [--dir DIR] [--no-dock] [--icon IMAGE]
   claude-move watch install|uninstall
+  claude-move quota-snapshot [write|status|schedule|unschedule] [--account A] [--out FILE] [--refresh] [--every MIN]
+  claude-move fm-pin [<account>] [--home DIR] [--force]
 <account> is a label you gave with `name`, or the first characters of the account id.
 """
 import argparse
@@ -38,7 +40,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 
 WIN = sys.platform == "win32"
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
@@ -385,6 +387,67 @@ T = {
                 "快捷键：1–9 打开对应卡片的终端 · / 搜索 · R 刷新 · Esc 关闭"),
     "w_desktop": ("Note: the desktop app's Code tab does not run status line scripts, so only CLI use is recorded.",
                   "注意：桌面 App 的 Code 页不运行状态栏脚本，只有用命令行版时才会记录。"),
+    "qs_noacct": ("No account to write: pass --account, or pin one for firstmate's crews first (claude-move fm-pin <account>).",
+                  "不知道写哪个号：加 --account，或者先给 firstmate 的船员钉一个号（claude-move fm-pin <账号>）。"),
+    "qs_badpin": ("{f} is not a pin claude-move can read (one line: ordinary, or an absolute path).",
+                  "{f} 的内容读不懂（应该是一行：ordinary，或者一个绝对路径）。"),
+    "qs_nologin": ("{d} has no CLI login.", "{d} 没有命令行登录。"),
+    "qs_noreply": ("{d} answered /usage without plan usage (signed out, or an API key).", "{d} 的 /usage 没有套餐额度（没登录，或者用的是 API key）。"),
+    "qs_fail": ("/usage of {d} failed: {e}", "{d} 的 /usage 没跑成：{e}"),
+    "qs_none": ("No official numbers for {a} yet, so nothing was written; {p} is left as it was.",
+                "{a} 还没有官方数据，什么都没写；{p} 保持原样。"),
+    "qs_kept": ("Kept {p} as it was: the saved numbers are not newer than the file.", "{p} 保持原样：存着的数不比文件里的新。"),
+    "qs_wrote": ("Wrote {p}: {a} · {w} · official numbers from {t}", "已写入 {p}：{a} · {w} · 官方数据取于 {t}"),
+    "qs_retired": ("Official numbers for {a} are {m} min old and /usage keeps failing, so the snapshot was moved to {p}: firstmate now sees no Claude quota instead of old numbers.",
+                   "{a} 的官方数据已经 {m} 分钟没更新、/usage 一直失败，快照挪到了 {p}：firstmate 会看到“没有额度数据”，而不是照着旧数派活。"),
+    "qs_sched_on": ("Every {n} min, launchd runs: claude-move quota-snapshot --refresh (log: {p}).",
+                    "已设成每 {n} 分钟由 launchd 运行 claude-move quota-snapshot --refresh（日志：{p}）。"),
+    "qs_sched_on_win": ("Every {n} min, Task Scheduler runs: claude-move quota-snapshot --refresh (log: {p}).",
+                        "已设成每 {n} 分钟由任务计划程序运行 claude-move quota-snapshot --refresh（日志：{p}）。"),
+    "qs_sched_off": ("The scheduled refresh is off.", "定时刷新已关。"),
+    "qs_sched_none": ("Scheduling needs macOS (launchd) or Windows (Task Scheduler); run quota-snapshot --refresh from cron instead.",
+                      "定时刷新需要 macOS（launchd）或 Windows（任务计划程序）；其他系统请用 cron 跑 quota-snapshot --refresh。"),
+    "qs_sched_fail": ("Could not set up the scheduled refresh: {e}", "定时刷新没设成：{e}"),
+    "qs_st_pin": ("firstmate's crews: {a} ({d}) · {f}", "firstmate 船员用：{a}（{d}）· {f}"),
+    "qs_st_nopin": ("firstmate's crews: not pinned, so they inherit firstmate's own CLAUDE_CONFIG_DIR ({f} does not exist)",
+                    "firstmate 船员用：没钉，跟着 firstmate 自己的 CLAUDE_CONFIG_DIR 走（{f} 不存在）"),
+    "qs_st_nofm": ("firstmate not found at {d} (set CLAUDE_MOVE_FM_HOME or pass --home).", "在 {d} 没找到 firstmate（设 CLAUDE_MOVE_FM_HOME，或者加 --home）。"),
+    "qs_st_file": ("Snapshot: {p} · {a} · {w} · {t} ago", "快照：{p} · {a} · {w} · {t}前"),
+    "qs_st_nofile": ("Snapshot: {p} not written yet", "快照：{p} 还没写过"),
+    "qs_st_sched": ("Scheduled refresh: every {n} min", "定时刷新：每 {n} 分钟"),
+    "qs_st_nosched": ("Scheduled refresh: off (claude-move quota-snapshot schedule)", "定时刷新：没开（claude-move quota-snapshot schedule）"),
+    "qs_st_rec": ("Status line recorder on {d}: {s}", "{d} 的状态栏记录器：{s}"),
+    "qs_on": ("on", "开着"),
+    "qs_off": ("off", "没装"),
+    "fp_nofm": ("firstmate not found at {d}; pass --home.", "在 {d} 没找到 firstmate；用 --home 指定。"),
+    "fp_noacct": ("No CLI login for {a}. Accounts with one: {l}", "{a} 没有命令行登录。有登录的号：{l}"),
+    "fp_cool": ("{a} is cooling ({w}); pass --force to pin it anyway.", "{a} 正在冷却（{w}）；确实要钉就加 --force。"),
+    "fp_same": ("firstmate's crews already use {a}.", "firstmate 的船员本来就在用 {a}。"),
+    "fp_done": ("Pinned firstmate's crews to {a}: {f} now says {v}.", "已把 firstmate 的船员钉到 {a}：{f} 现在写的是 {v}。"),
+    "fp_note": ("Crews started from now on use it; crews already running stay on their account.",
+                "从现在起新起的船员用这个号；已经在跑的船员不变。"),
+    "fp_line": ("{m} {a:10} {w}", "{m} {a:10} {w}"),
+    "fp_left": ("{p}% left this week", "本周剩 {p}%"),
+    "fp_noff": ("no official % yet", "还没有官方数据"),
+    "fp_hint": ("Pin one: claude-move fm-pin <account>", "换号：claude-move fm-pin <账号>"),
+    "n_crew_switch": ("{b} has {p}% left this week: claude-move fm-pin {b}", "{b} 本周还剩 {p}%，要换就敲 claude-move fm-pin {b}"),
+    "pt_crew": ("firstmate crews", "firstmate 船员"),
+    "pp_d_crew": ("Crew", "船员"),
+    "pt_crew_tip": ("Which account firstmate's crews use, and the quota snapshot firstmate reads", "firstmate 船员用哪个号，以及给 firstmate 读的额度快照"),
+    "pt_crew_flow": ("How it works: 1. Pin an account here (or claude-move fm-pin <account>); crews started after that use it, running ones stay. "
+                     "2. claude-move writes that account's official % to the snapshot firstmate reads (QUOTA_AXI_SNAPSHOT), every 10 min and whenever the status line records. "
+                     "3. At 90 and 95% the notification names the account with the most left; switching stays your call.",
+                     "流程：1. 在这里给船员钉一个号（或者敲 claude-move fm-pin <账号>），之后新起的船员用这个号，已经在跑的不变。"
+                     "2. claude-move 把这个号的官方百分比写进 firstmate 读的快照（QUOTA_AXI_SNAPSHOT），每 10 分钟一次，状态栏记录到新数时也会写。"
+                     "3. 过 90%、95% 时，通知会告诉你哪个号剩得最多；换不换由你决定。"),
+    "pt_crew_pin": ("Pin for crews", "钉给船员"),
+    "pt_crew_pinned": ("crews use this", "船员在用"),
+    "pt_crew_pin_confirm": ("Pin firstmate's crews to {a}? Crews started after this use it; running ones stay.",
+                            "把 firstmate 的船员钉到 {a}？之后新起的船员用这个号，已经在跑的不变。"),
+    "pt_crew_snap": ("Refresh the snapshot now", "现在刷新快照"),
+    "pt_crew_sched_on": ("Refresh every 10 min", "开定时刷新（10 分钟）"),
+    "pt_crew_sched_off": ("Stop the scheduled refresh", "关定时刷新"),
+    "pp_crew": ("firstmate's crews use this account", "firstmate 的船员在用这个号"),
 }
 
 
@@ -1307,9 +1370,13 @@ def parse_usage_report(stdout):
         for r in limits:
             if not isinstance(r, dict) or r.get("percent") is None:
                 continue
-            scope = ((r.get("scope") or {}).get("model") or {}).get("display_name") if isinstance(r.get("scope"), dict) else None
-            rows.append({"kind": r.get("kind") or "", "percent": r["percent"],
-                         "resets_at": iso_ts(r["resets_at"]) if r.get("resets_at") else None, "scope": scope})
+            model = (r.get("scope") or {}).get("model") if isinstance(r.get("scope"), dict) else None
+            model = model if isinstance(model, dict) else {}
+            row = {"kind": r.get("kind") or "", "percent": r["percent"],
+                   "resets_at": iso_ts(r["resets_at"]) if r.get("resets_at") else None, "scope": model.get("display_name")}
+            if model.get("id"):
+                row["model"] = model["id"]
+            rows.append(row)
         return rows
     return None
 
@@ -1600,6 +1667,7 @@ ICONS = {  # 24x24 stroked paths for the page's buttons
     "moon": '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
     "contrast": '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>',
     "search": '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+    "anchor": '<circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 10.5h8M4.5 13.5a7.5 7.5 0 0 0 15 0"/>',
     "flame": '<path d="M12 21a6.5 6.5 0 0 0 6.5-6.5c0-4-3-6-4-9.5-2 1.5-3 3.5-3 5.5-1-1-1.5-2-1.5-3.5-2.5 2-4.5 4.5-4.5 7.5A6.5 6.5 0 0 0 12 21z"/>',
 }
 
@@ -1701,8 +1769,9 @@ def card_html(r, rep, live):
             acts += f'<button class="ib" type="button" data-login="{a}" data-tip="{tip(t("pt_login"))}">{icon("adduser")}</button>'
         acts += f'<button class="ib" type="button" data-rename="{a}" data-tip="{tip(t("pt_rename"))}">{icon("pen")}</button>'
     plan = E(r["plan"]) if r["plan"] else "&nbsp;"
+    crew = f'<span class="crewmark" data-tip="{tip(t("pp_crew"))}">{icon("anchor")}</span>' if live and r["acct"] == crew_acct() else ""
     return (f'<article class="card" {attrs} data-heat="{heat}"><div class="sky"><canvas class="orb" aria-hidden="true"></canvas>'
-            f'<div class="head"><div><div class="name">{E(r["name"])}<span class="deskmark" hidden data-tip="{tip(t("pp_desk"))}">{icon("desk")}</span></div>'
+            f'<div class="head"><div><div class="name">{E(r["name"])}<span class="deskmark" hidden data-tip="{tip(t("pp_desk"))}">{icon("desk")}</span>{crew}</div>'
             f'<div class="plan">{plan}</div></div>{chip}</div></div>'
             f'<div class="glass"><div class="hero"><div>{big}<div class="what">{E(what)}</div><div class="when"><span class="rs">{E(when_)}</span></div></div>{spend}</div>'
             + (f'<div class="pills" role="group">{pills}</div>' if pills else "")
@@ -1761,6 +1830,8 @@ def render_html(rep, live=None):
                 ("t-runs", "loop", "pp_d_runs", "pt_runs"), ("t-doc", "pulse", "pp_d_doc", "pt_doctor"),
                 ("t-notify", "bell", "pp_d_notify", "pt_notify"), ("", "adduser", "pp_d_login", "pt_login_new"),
                 ("t-upd", "update", "pp_d_upd", "pt_update")]
+        if is_firstmate(FM_HOME):
+            dock.insert(-2, ("t-crew", "anchor", "pp_d_crew", "pt_crew_tip"))
         tools = "".join(f'<button class="tool" type="button" {f"data-open={q}" if q else "id=dock-login"} aria-pressed="false" '
                         f'data-tip="{tip(t(k2))}">{icon(ic)}{E(t(k))}</button>' for q, ic, k, k2 in dock)
         bottom = f'<section class="panel dock"><div class="tools">{tools}</div><div class="legend">{ramp}</div>{tools_html()}</section>'
@@ -3747,9 +3818,14 @@ def watch_record(sp, state):
             rows = [{"kind": kind, "percent": rl[key]["used_percentage"], "resets_at": rl[key].get("resets_at")}
                     for key, kind in (("seven_day", "weekly_all"), ("five_hour", "session"))
                     if isinstance(rl.get(key), dict) and rl[key].get("used_percentage") is not None]
+            old = cur.get(acct) if isinstance(cur.get(acct), dict) else {}
+            if time.time() - old.get("at", 0) < 3600:  # the status line has no per-model meters: keep those /usage gave
+                rows += [r for r in official_rows(old) if r.get("kind") == "weekly_scoped" and (r.get("resets_at") or 0) > time.time()]
             cur[acct] = {"at": time.time(), "src": "statusline", "rows": rows}
             save_json(LIMITS, cur)
             check_levels(acct, rows)
+            if acct == crew_acct() and time.time() - ((load(SNAP_CONF) or {}).get("at") or 0) >= 60:
+                write_snapshot(Path(os.path.expanduser(cfg)) if cfg else HOME / ".claude", snapshot_out())
             f5 = (rl.get("five_hour") or {}).get("used_percentage")
             f7 = (rl.get("seven_day") or {}).get("used_percentage")
             shown = " · ".join(x for x in (f"5h {f5:.0f}%" if f5 is not None else "", f"7d {f7:.0f}%" if f7 is not None else "") if x)
@@ -3920,7 +3996,9 @@ def check_levels(acct, rows):
         hit = max((lv for lv in conf["levels"] if p >= lv), default=0)
         if hit > old.get("level", 0):
             msg = t("n_level", a=names().get(acct, acct[:8]), k=row_label(r), p=f"{p:.0f}")
-            notify(t("n_title"), msg + (" · " + t("n_reset", w=clock(reset)) if reset else ""))
+            msg += " · " + t("n_reset", w=clock(reset)) if reset else ""
+            hint = switch_hint(acct) if hit >= 90 and acct == crew_acct() else ""
+            notify(t("n_title"), msg + ("\n" + hint if hint else ""))
             old["level"] = hit
         if mine.get(key) != old:
             mine[key], changed = old, True
@@ -3976,6 +4054,382 @@ def cmd_notify(args):
     if args.action != "status" or args.levels:
         save_json(NOTIFY, conf)
     print(t("n_on", l="/".join(map(str, conf["levels"]))) if conf["on"] else t("n_off"))
+
+
+# ---------- firstmate: the quota snapshot its quota-axi reads, and the account its crews use
+FM_HOME = Path(os.path.expanduser(os.environ.get("CLAUDE_MOVE_FM_HOME") or str(HOME / "Developer/firstmate")))
+SNAPSHOT = Path(os.environ.get("CLAUDE_MOVE_SNAPSHOT") or str(HOME / ".cache/claude-move/quota-axi-snapshot.json"))
+SNAP_LOG = HOME / ".cache/claude-move/quota-snapshot.log"
+SNAP_CONF = CONF / "snapshot.json"
+AGENT = "com.github.layla-nl.claude-move.quota-snapshot"
+AGENTS = Path(os.environ.get("CLAUDE_MOVE_AGENTS") or str(HOME / "Library/LaunchAgents"))
+WIN_TASK = "claude-move quota snapshot"
+STALE_AFTER = 60  # minutes without new official numbers, /usage failing, before firstmate stops getting the old ones
+OTHERS_EVERY = 3600  # the other logins' /usage, for the switch hint, at most this often
+
+
+def is_firstmate(home):
+    return (home / "bin" / "fm-spawn.sh").is_file()
+
+
+def fm_pin_file(home=None):
+    return (home or FM_HOME) / "config" / "claude-account"
+
+
+def fm_pin(home=None):
+    """firstmate's Claude worker pin as (CLI config folder, None); (None, None) when there is none; (None, error)."""
+    f = fm_pin_file(home)
+    try:
+        body = f.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None, None
+    except (OSError, UnicodeDecodeError):
+        return None, t("qs_badpin", f=short(f))
+    m = re.fullmatch(r"(ordinary|/[^\x00-\x1f\x7f]*)\n?", body)
+    if not m:
+        return None, t("qs_badpin", f=short(f))
+    return (HOME / ".claude" if m.group(1) == "ordinary" else Path(m.group(1))), None
+
+
+def crew_acct():
+    cfg, _ = fm_pin()
+    return cli_account(cfg) if cfg else None
+
+
+def iso_utc(ts):
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def quota_windows(rows):
+    """Official rows as quota-axi's Claude windows, with the ids its own Claude reader gives them."""
+    out = []
+    for r in rows:
+        if r.get("percent") is None:
+            continue
+        kind = r.get("kind")
+        if kind == "session":
+            w, secs = {"id": "five_hour", "label": "session", "kind": "session"}, FIVE_H
+        elif kind == "weekly_all":
+            w, secs = {"id": "seven_day", "label": "week", "kind": "weekly"}, WEEK
+        elif kind == "weekly_scoped" and r.get("scope"):
+            key = r.get("model") or re.sub(r"[^a-z0-9]+", "_", r["scope"].strip().lower()).strip("_")
+            w, secs = {"id": f"model:{key}", "label": f'{r["scope"]} week', "kind": "model"}, WEEK
+        else:
+            continue
+        num = lambda x: int(x) if x == int(x) else round(x, 2)
+        p = max(0.0, min(100.0, float(r["percent"])))
+        w.update(percentUsed=num(p), percentRemaining=num(100 - p))
+        if r.get("resets_at"):
+            w["resetsAt"] = iso_utc(r["resets_at"])
+        w["windowSeconds"] = secs
+        out.append(w)
+    order = {"five_hour": 0, "seven_day": 1}
+    return sorted(out, key=lambda w: order.get(w["id"], 2))
+
+
+def snapshot_payload(rows, at):
+    """quota-axi's cache format (schema 3): one keyless Claude row, the one firstmate binds its Claude crews to."""
+    return {"schemaVersion": 3, "providers": [{
+        "provider": "claude", "label": "Claude", "source": "cli", "windows": quota_windows(rows),
+        "state": {"status": "fresh", "stale": False, "sourcesTried": ["cli"], "refreshedAt": iso_utc(at)}}]}
+
+
+def read_snapshot(path):
+    """(refreshedAt as epoch seconds, windows) of a snapshot file, or (None, [])."""
+    try:
+        p = load(path)["providers"][0]
+        return iso_ts(p["state"]["refreshedAt"]), p.get("windows") or []
+    except (TypeError, KeyError, IndexError):
+        return None, []
+
+
+def windows_text(ws):
+    lab = lambda w: {"five_hour": t("u_5h"), "seven_day": t("u_week")}.get(w["id"]) or row_label(
+        {"kind": "weekly_scoped", "scope": re.sub(r" week$", "", w.get("label", ""))})
+    return " · ".join(t("u_pct", k=lab(w), p=round(w.get("percentUsed") or 0)) for w in ws)
+
+
+def write_private(path, text):
+    """Write to a temporary file readable only by this user, then rename it over path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(str(tmp), 0o600)
+    os.replace(str(tmp), str(path))
+
+
+def snap_log(line):
+    """One line in ~/.cache/claude-move/quota-snapshot.log, which keeps its last 1000 lines."""
+    try:
+        old = SNAP_LOG.read_text(encoding="utf-8").splitlines()[-999:] if SNAP_LOG.exists() else []
+        SNAP_LOG.parent.mkdir(parents=True, exist_ok=True)
+        SNAP_LOG.write_text("\n".join(old + [time.strftime("%Y-%m-%d %H:%M:%S ") + line]) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def snapshot_out():
+    return Path((load(SNAP_CONF) or {}).get("out") or SNAPSHOT)
+
+
+def write_snapshot(cfg, out, refresh=False, stale_after=STALE_AFTER):
+    """Write one CLI login's official numbers where quota-axi reads them (QUOTA_AXI_SNAPSHOT); (ok, message).
+    Nothing is made up: without official numbers the old file stays. When they are stale_after minutes old and
+    /usage keeps failing, the file is moved aside, so firstmate sees no Claude quota rather than old quota."""
+    acct = cli_account(cfg)
+    if not acct:
+        return False, t("qs_nologin", d=short(cfg))
+    who = names().get(acct, acct[:8])
+    err = None
+    if refresh:
+        try:
+            if refresh_one(cfg) is None:
+                err = t("qs_noreply", d=short(cfg))
+        except (OSError, subprocess.SubprocessError) as e:
+            err = t("qs_fail", d=short(cfg), e=e)
+    rec = (load(LIMITS) or {}).get(acct)
+    rows = official_rows(rec)
+    at = rec.get("at", 0) if isinstance(rec, dict) else 0
+    ws = quota_windows(rows)
+    old_at, _ = read_snapshot(out)
+    conf = load(SNAP_CONF) or {}
+    # after a failed /usage, numbers the status line saved since the file was written still count, if they are recent
+    if ws and (not err or (at > (old_at or 0) + 1 and time.time() - at < stale_after * 60)):
+        write_private(out, json.dumps(snapshot_payload(rows, at), indent=2) + "\n")
+        conf.update(acct=acct, out=str(out), at=at)
+        save_json(SNAP_CONF, conf)
+        pct = {w["id"]: w["percentUsed"] for w in ws}
+        snap_log(f'{who} ({acct[:8]}) five_hour={pct.get("five_hour", "-")}% seven_day={pct.get("seven_day", "-")}% '
+                 f'refreshedAt={iso_utc(at)}' + (f" · {err}" if err else ""))
+        msg = t("qs_wrote", p=short(out), a=who, w=windows_text(ws), t=clock(at))
+        return True, (err + "\n" + msg) if err else msg
+    msg = t("qs_kept", p=short(out)) if ws else t("qs_none", a=who, p=short(out))
+    msg = (err + "\n" + msg) if err else msg
+    newest = max(at, old_at or 0)
+    if refresh and err and out.exists() and newest and time.time() - newest > stale_after * 60:
+        aside = out.with_name(out.name + ".stale")
+        os.replace(str(out), str(aside))
+        gone = t("qs_retired", a=who, m=round((time.time() - newest) / 60), p=short(aside))
+        notify(t("n_title"), gone)
+        msg += "\n" + gone
+    snap_log("not written: " + msg.replace("\n", " · "))
+    return False, msg
+
+
+def refresh_others(skip, extra=()):
+    """Ask the other CLI logins' /usage, each at most once an hour, so the switch hint has numbers to go on."""
+    lim = load(LIMITS) or {}
+    seen = {skip}
+    for c in cli_configs(extra):
+        a = cli_account(c)
+        if a in seen:
+            continue
+        seen.add(a)
+        rec = lim.get(a)
+        if isinstance(rec, dict) and time.time() - rec.get("at", 0) < OTHERS_EVERY:
+            continue
+        try:
+            refresh_one(c)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+def switch_hint(acct):
+    """For the account firstmate's crews use: the CLI login with the most of this week left, from saved numbers."""
+    lim = load(LIMITS) or {}
+    now = time.time()
+    best = None
+    for c in cli_configs():
+        a = cli_account(c)
+        rec = lim.get(a)
+        if a == acct or not isinstance(rec, dict) or now - rec.get("at", 0) > 6 * 3600:
+            continue
+        rows = official_rows(rec)
+        if any((r.get("percent") or 0) >= 100 and (r.get("resets_at") or 0) > now for r in rows):
+            continue
+        wk = next((r["percent"] for r in rows if r.get("kind") == "weekly_all" and r.get("percent") is not None), None)
+        if wk is not None and wk < 90 and (best is None or wk < best[1]):
+            best = (a, wk)
+    return t("n_crew_switch", b=names().get(best[0], best[0][:8]), p=round(100 - best[1])) if best else ""
+
+
+def launchctl(*a):
+    cmd = os.environ.get("CLAUDE_MOVE_LAUNCHCTL")  # tests
+    if cmd:
+        return subprocess.run(f"{cmd} {' '.join(a)}", shell=True, capture_output=True, text=True)
+    return subprocess.run(["launchctl", *a], capture_output=True, text=True)
+
+
+def snapshot_schedule(on, every=10, out=None):
+    """Run `quota-snapshot --refresh` every few minutes: a launchd agent on macOS, a scheduled task on Windows."""
+    conf = load(SNAP_CONF) or {}
+    script = str(Path(__file__).resolve())
+    if sys.platform == "darwin":
+        import plistlib
+        plist = AGENTS / f"{AGENT}.plist"
+        launchctl("bootout", f"gui/{os.getuid()}", str(plist))  # the copy loaded before, if any
+        if on:
+            env = {"PATH": f"{HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "CLAUDE_MOVE_LANG": "zh" if ZH else "en"}
+            exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude")
+            if exe:
+                env["CLAUDE_MOVE_CLAUDE"] = exe
+            for k in ("CLAUDE_MOVE_HOME", "CLAUDE_MOVE_FM_HOME", "CLAUDE_MOVE_SNAPSHOT"):
+                if os.environ.get(k):
+                    env[k] = os.environ[k]
+            AGENTS.mkdir(parents=True, exist_ok=True)
+            plist.write_bytes(plistlib.dumps({
+                "Label": AGENT, "ProgramArguments": ["/usr/bin/python3" if Path("/usr/bin/python3").exists() else sys.executable,
+                                                     script, "quota-snapshot", "--refresh"]
+                + (["--out", str(out)] if out else []),
+                "StartInterval": int(every * 60), "RunAtLoad": True, "ProcessType": "Background", "LowPriorityIO": True,
+                "EnvironmentVariables": env, "StandardOutPath": str(SNAP_LOG.with_suffix(".out")),
+                "StandardErrorPath": str(SNAP_LOG.with_suffix(".out"))}))
+            r = launchctl("bootstrap", f"gui/{os.getuid()}", str(plist))
+            if r.returncode:
+                return False, t("qs_sched_fail", e=(r.stderr or r.stdout).strip())
+        elif plist.exists():
+            plist.unlink()
+    elif WIN:
+        if on:
+            pyw = Path(sys.executable).with_name("pythonw.exe")
+            run = f'"{pyw if pyw.exists() else sys.executable}" "{script}" quota-snapshot --refresh' + (f' --out "{out}"' if out else "")
+            r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(int(every)), "/TN", WIN_TASK, "/TR", run],
+                               capture_output=True, text=True, creationflags=NO_WINDOW)
+            if r.returncode:
+                return False, t("qs_sched_fail", e=(r.stderr or r.stdout).strip())
+        else:
+            subprocess.run(["schtasks", "/Delete", "/F", "/TN", WIN_TASK], capture_output=True, creationflags=NO_WINDOW)
+    else:
+        return False, t("qs_sched_none")
+    conf.update(sched=on, every=int(every))
+    if out:
+        conf["out"] = str(out)
+    save_json(SNAP_CONF, conf)
+    if not on:
+        return True, t("qs_sched_off")
+    return True, t("qs_sched_on_win" if WIN else "qs_sched_on", n=int(every), p=short(SNAP_LOG))
+
+
+def crew_lines(home=None):
+    """What firstmate's crews use, the snapshot, its refresh and the recorder, one line each."""
+    home = home or FM_HOME
+    out = [] if is_firstmate(home) else [t("qs_st_nofm", d=short(home))]
+    cfg, err = fm_pin(home)
+    f = short(fm_pin_file(home))
+    if err:
+        out.append(err)
+    elif cfg:
+        a = cli_account(cfg) or "?"
+        out.append(t("qs_st_pin", a=names().get(a, a[:8]), d=short(cfg), f=f))
+    else:
+        out.append(t("qs_st_nopin", f=f))
+    conf = load(SNAP_CONF) or {}
+    p = snapshot_out()
+    at, ws = read_snapshot(p)
+    if at:
+        a = conf.get("acct") or "?"
+        out.append(t("qs_st_file", p=short(p), a=names().get(a, a[:8]), w=windows_text(ws), t=ago(time.time() - at)))
+    else:
+        out.append(t("qs_st_nofile", p=short(p)))
+    out.append(t("qs_st_sched", n=conf.get("every", 10)) if conf.get("sched") else t("qs_st_nosched"))
+    if cfg:
+        out.append(t("qs_st_rec", d=short(recorder_path(cfg)), s=t("qs_on") if recorder_on(cfg) else t("qs_off")))
+    return out
+
+
+def crew_accounts(extra=()):
+    """Every CLI login with its saved official numbers, for choosing which one firstmate's crews use."""
+    lim = load(LIMITS) or {}
+    pinned = crew_acct()
+    now = time.time()
+    out, seen = [], set()
+    for c in cli_configs(extra):
+        a = cli_account(c)
+        if a in seen:
+            continue
+        seen.add(a)
+        rec = lim.get(a)
+        rows = official_rows(rec)
+        cool = any((r.get("percent") or 0) >= 100 and (r.get("resets_at") or 0) > now for r in rows)
+        wk = next((r["percent"] for r in rows if r.get("kind") == "weekly_all" and r.get("percent") is not None), None)
+        text = (rows_text(rows) + " · " + t("u_off_head", a=ago(now - rec["at"]))) if rows else t("fp_noff")
+        out.append({"acct": a, "name": names().get(a, a[:8]), "dir": short(c), "text": text, "cool": cool,
+                    "left": None if wk is None else round(100 - wk), "pinned": a == pinned})
+    return out
+
+
+def fm_pin_set(cfg, force=False, home=None):
+    """Pin firstmate's Claude crews to one CLI login (config/claude-account), then point the snapshot at it."""
+    home = home or FM_HOME
+    acct = cli_account(cfg)
+    who = names().get(acct, acct[:8])
+    try:
+        rows = refresh_one(cfg)  # proves the folder is signed in, and brings its numbers up to date
+    except (OSError, subprocess.SubprocessError) as e:
+        sys.exit(t("qs_fail", d=short(cfg), e=e))
+    if rows is None:
+        sys.exit(t("qs_noreply", d=short(cfg)))
+    now = time.time()
+    cool = [r.get("resets_at") or 0 for r in rows if (r.get("percent") or 0) >= 100 and (r.get("resets_at") or 0) > now]
+    if cool and not force:
+        sys.exit(t("fp_cool", a=who, w=clock(max(cool))))
+    value = "ordinary" if cfg == HOME / ".claude" else str(cfg)
+    cur, _ = fm_pin(home)
+    f = fm_pin_file(home)
+    if cur is not None and str(cur) == str(cfg):
+        print(t("fp_same", a=who))
+    else:
+        write_private(f, value + "\n")
+        snap_log(f"pin {cur if cur is not None else '-'} -> {value}")
+        print(t("fp_done", a=who, f=short(f), v=value))
+        print(t("fp_note"))
+    print(write_snapshot(cfg, snapshot_out())[1])
+
+
+def cmd_fm_pin(args):
+    home = Path(os.path.expanduser(args.home)) if args.home else FM_HOME
+    if not is_firstmate(home):
+        sys.exit(t("fp_nofm", d=short(home)))
+    if not args.account:
+        print("\n".join(crew_lines(home)))
+        print()
+        for a in crew_accounts(args.config or ()):
+            print(t("fp_line", m="*" if a["pinned"] else " ", a=a["name"], w=a["text"]))
+        print(t("fp_hint"))
+        return
+    cfg = cli_dir(args.account, args.config or ())
+    if not cfg:
+        sys.exit(t("fp_noacct", a=args.account, l=", ".join(a["name"] for a in crew_accounts(args.config or ())) or "-"))
+    fm_pin_set(cfg, args.force, home)
+
+
+def cmd_quota_snapshot(args):
+    out = Path(os.path.expanduser(args.out)) if args.out else None
+    if args.action in ("schedule", "unschedule"):
+        ok, msg = snapshot_schedule(args.action == "schedule", args.every, out)
+        print(msg)
+        if not ok:
+            sys.exit(1)
+        return
+    if args.action == "status":
+        print("\n".join(crew_lines()))
+        return
+    if args.account:
+        cfg = cli_dir(args.account, args.config or ())
+        err = None if cfg else t("fp_noacct", a=args.account, l=", ".join(a["name"] for a in crew_accounts(args.config or ())) or "-")
+    else:
+        cfg, err = fm_pin()
+        err = err or (None if cfg else t("qs_noacct"))
+    if err:
+        sys.exit(err)
+    ok, msg = write_snapshot(cfg, out or snapshot_out(), args.refresh, args.stale_after)
+    if args.refresh:
+        refresh_others(cli_account(cfg), args.config or ())
+    print(msg)
+    if not ok:
+        sys.exit(1)
 
 
 # ---------- run: switch account at a usage limit and go on
@@ -4410,6 +4864,9 @@ def panel_api(method, path, q, body, extra=()):
             return 200, {"items": doctor_items(extra)}
         if name == "notify":
             return 200, notify_conf()
+        if name == "crew":
+            return 200, {"found": is_firstmate(FM_HOME), "info": crew_lines(), "accounts": crew_accounts(extra),
+                         "sched": bool((load(SNAP_CONF) or {}).get("sched"))}
         if name == "update":
             try:
                 tag, url, newer = check_update()
@@ -4528,6 +4985,23 @@ def panel_api(method, path, q, body, extra=()):
             use_lang(body["lang"])
         save_json(LOOK, cur)
         return 200, {"ok": True}
+    if name == "crew":
+        do = body.get("do")
+        if do == "pin":
+            if not cfg or not is_firstmate(FM_HOME):
+                return bad
+            ok, log = captured(lambda: fm_pin_set(cfg))
+            return 200, {"ok": ok, "log": log}
+        if do == "snapshot":
+            pin, err = fm_pin()
+            if not pin:
+                return 200, {"ok": False, "log": err or t("qs_noacct")}
+            ok, log = write_snapshot(pin, snapshot_out(), refresh=True)
+            return 200, {"ok": ok, "log": log}
+        if do == "schedule":
+            ok, log = snapshot_schedule(bool(body.get("on")), (load(SNAP_CONF) or {}).get("every", 10))
+            return 200, {"ok": ok, "log": log}
+        return bad
     if name == "doctor":
         _, log = captured(lambda: refresh_official(extra))
         return 200, {"ok": True, "log": log, "items": doctor_items(extra)}
@@ -4718,17 +5192,49 @@ async function loadNotify() {
 }
 $("nt-save").onclick = async () => { $("nt-msg").textContent = (await post("notify", {on: $("nt-on").checked, levels: $("nt-levels").value})).log; };
 $("nt-test").onclick = async () => { $("nt-msg").textContent = (await post("notify", {test: true})).log; };
+async function loadCrew() {
+  const r = await get("crew");
+  const info = $("crew-info"), box = $("crew-accts");
+  info.innerHTML = "";
+  box.innerHTML = "";
+  r.info.forEach(x => info.append(el("div", {className: "item"}, x)));
+  r.accounts.forEach(a => {
+    const row = el("div", {className: "item" + (a.cool ? " dim" : "")}, a.name + " · " + a.text);
+    if (a.pinned) row.append(el("b", {textContent: "· " + TT.pt_crew_pinned}));
+    else if (r.found) {
+      const b = el("button", {className: "ghost", textContent: TT.pt_crew_pin});
+      b.onclick = async () => {
+        if (!confirm(fmt(TT.pt_crew_pin_confirm, {a: a.name}))) return;
+        say("crew-log", TT.p_working);
+        const x = await post("crew", {do: "pin", acct: a.acct});
+        say("crew-log", x.log);
+        if (x.ok) reload();
+      };
+      row.append(b);
+    }
+    box.append(row);
+  });
+  $("crew-sched").textContent = r.sched ? TT.pt_crew_sched_off : TT.pt_crew_sched_on;
+  $("crew-sched").dataset.on = r.sched ? "1" : "";
+}
+$("crew-snap").onclick = async () => { say("crew-log", TT.p_working); say("crew-log", (await post("crew", {do: "snapshot"})).log); loadCrew(); };
+$("crew-sched").onclick = async () => {
+  say("crew-log", TT.p_working);
+  say("crew-log", (await post("crew", {do: "schedule", on: !$("crew-sched").dataset.on})).log);
+  loadCrew();
+};
 $("up-go").onclick = async () => { $("up-msg").textContent = TT.p_working; $("up-msg").textContent = (await get("update")).log; };
 
 const loaders = {"t-move": loadMove, "t-undo": loadUndo, "t-sess": loadSess, "t-imp": loadImp, "t-runs": loadRuns,
-  "t-doc": loadDoc, "t-notify": loadNotify};
+  "t-doc": loadDoc, "t-notify": loadNotify, "t-crew": loadCrew};
 Object.entries(loaders).forEach(([id, fn]) => $(id).addEventListener("toggle", () => { if ($(id).open) fn(); }));
 try { JSON.parse(sessionStorage.getItem("open") || "[]").forEach(id => { if ($(id)) $(id).open = true; }); } catch (e) {}
 """
 
 TOOLS_KEYS = ("p_working", "no_backups", "pt_move_confirm", "pt_undo_btn", "pt_undo_confirm", "pt_undone", "pt_archived",
               "pt_in_desk", "pt_runs_none", "pt_run_line", "pt_run_switch", "pt_running", "pt_ended", "pt_fix",
-              "pt_rename_ask", "pt_rec_confirm", "pt_login_ask")
+              "pt_rename_ask", "pt_rec_confirm", "pt_login_ask", "pt_crew_pin", "pt_crew_pinned", "pt_crew_pin_confirm",
+              "pt_crew_sched_on", "pt_crew_sched_off")
 
 
 def tools_html():
@@ -4752,6 +5258,10 @@ def tools_html():
 <details id="t-notify"><summary>{e("pt_notify")}</summary><div class="row"><label><input type="checkbox" id="nt-on"> {e("pt_notify_on")}</label>
 <input type="text" id="nt-levels" size="10"> %<button class="ghost" id="nt-save">{e("pt_save")}</button><button class="ghost" id="nt-test">{e("pt_test")}</button></div>
 <p class="dim" id="nt-msg"></p></details>
+<details id="t-crew"><summary>{e("pt_crew")}</summary><p class="dim">{e("pt_crew_flow")}</p>
+<div class="list" id="crew-info"></div><div class="list" id="crew-accts"></div>
+<div class="row"><button class="ghost" id="crew-snap">{e("pt_crew_snap")}</button><button class="ghost" id="crew-sched"></button></div>
+<pre class="log" id="crew-log" hidden></pre></details>
 <details id="t-upd"><summary>{e("pt_update")}</summary><div class="row"><button class="ghost" id="up-go">{e("pt_update_btn")}</button></div>
 <p class="dim" id="up-msg"></p></details>
 </div>'''
@@ -4853,6 +5363,25 @@ def main(argv=None):
     w = sub.add_parser("watch", help="record official CLI rate limits from the Claude Code status line")
     w.add_argument("action", choices=["install", "uninstall", "record"])
     w.set_defaults(fn=cmd_watch)
+    qs = sub.add_parser("quota-snapshot", help="write one account's official %% in quota-axi's format, for firstmate "
+                                               "(QUOTA_AXI_SNAPSHOT); `schedule` refreshes it every few minutes")
+    qs.add_argument("action", nargs="?", default="write", choices=["write", "status", "schedule", "unschedule"])
+    qs.add_argument("--account", help="label or id prefix (default: the account firstmate's crews are pinned to)")
+    qs.add_argument("--out", help="snapshot file (default ~/.cache/claude-move/quota-axi-snapshot.json)")
+    qs.add_argument("--refresh", action="store_true", help="first ask that login's official /usage (no quota used)")
+    qs.add_argument("--every", type=float, default=10, help="with schedule: minutes between refreshes (default 10)")
+    qs.add_argument("--stale-after", type=float, default=STALE_AFTER,
+                    help="with --refresh: when /usage keeps failing and the numbers are this many minutes old, move the "
+                         "snapshot aside so firstmate sees no quota instead of old quota (default %(default)g)")
+    qs.add_argument("--config", action="append", help="also use this CLI config folder (repeatable)")
+    qs.set_defaults(fn=cmd_quota_snapshot)
+    fp = sub.add_parser("fm-pin", help="show, or set, which account firstmate's Claude crews use (its config/claude-account); "
+                                       "the snapshot follows")
+    fp.add_argument("account", nargs="?", help="label or id prefix of an account with a CLI login; none: show the accounts")
+    fp.add_argument("--home", help="firstmate's folder (default ~/Developer/firstmate)")
+    fp.add_argument("--force", action="store_true", help="pin it even while it is cooling")
+    fp.add_argument("--config", action="append", help="also use this CLI config folder (repeatable)")
+    fp.set_defaults(fn=cmd_fm_pin)
     args = p.parse_args(argv)
     args.fn(args)
 
