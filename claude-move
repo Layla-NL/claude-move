@@ -1728,6 +1728,7 @@ ICONS = {  # 24x24 stroked paths for the page's buttons
     "moon": '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
     "contrast": '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>',
     "search": '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+    "sliders": '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
     "anchor": '<circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 10.5h8M4.5 13.5a7.5 7.5 0 0 0 15 0"/>',
     "flame": '<path d="M12 21a6.5 6.5 0 0 0 6.5-6.5c0-4-3-6-4-9.5-2 1.5-3 3.5-3 5.5-1-1-1.5-2-1.5-3.5-2.5 2-4.5 4.5-4.5 7.5A6.5 6.5 0 0 0 12 21z"/>',
 }
@@ -5695,13 +5696,14 @@ TOOLS_CSS = """
 .toolbox summary::-webkit-details-marker{display:none}
 .toolbox .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
 .toolbox select,.toolbox input[type=text]{font:inherit;font-size:13px;padding:6px 9px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--ink);max-width:100%}
-.toolbox button,.live button{font-size:13px;font-weight:600;border:0;border-radius:10px;padding:7px 12px;background:var(--btn);color:var(--btnink)}
+.toolbox button,.live button:not(.ib){font-size:13px;font-weight:600;border:0;border-radius:10px;padding:7px 12px;background:var(--btn);color:var(--btnink)}
 .toolbox button.ghost,.live button.ghost{background:var(--raise);color:var(--ink);box-shadow:var(--pill)}
 .toolbox pre.log,.live pre.log{margin-top:10px}
 .live{padding:14px 16px}
 .live .lhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .live h2{margin:0 auto 0 0;font:600 15px var(--display);display:flex;gap:8px;align-items:center}
-.live .item .st{min-width:44px;color:var(--dim)} .live .item.busy .st{color:var(--hot);font-weight:600}
+.live .item .st{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--dim);flex:none;margin:0 4px}
+.live .item.busy .st{background:var(--hot);border-color:var(--hot)}
 .live .item .t{flex:1;min-width:0} .live .item b{min-width:64px}
 .list{max-height:340px;overflow:auto;margin:8px 0}
 .item{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;padding:6px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}
@@ -5918,12 +5920,14 @@ async function loadLive() {
   $("lv-sum").textContent = fmt(TT.pp_live_sum, {n: rows.length, b: rows.filter(x => x.status === "busy").length});
   if (!rows.length) empty(box, TT.ps_none);
   rows.forEach(x => {
-    const row = el("div", {className: "item" + (x.status === "busy" ? " busy" : "")}, el("b", {textContent: x.name}),
-      el("span", {className: "st", textContent: TT["ps_" + x.status] || x.status}),
+    const st = el("span", {className: "st"});
+    st.dataset.tip = TT["ps_" + x.status] || x.status;
+    const row = el("div", {className: "item" + (x.status === "busy" ? " busy" : "")}, st, el("b", {textContent: x.name}),
       el("span", {className: "t", textContent: (x.title || x.sid.slice(0, 8)) + " · " + x.project}),
       el("small", {className: "dim", textContent: x.tmux}));
     if (x.tmux) {
-      const b = el("button", {className: "ghost", textContent: TT.pp_go});
+      const b = el("button", {className: "ib", type: "button", innerHTML: '<svg class="i" aria-hidden="true"><use href="#i-term"/></svg>'});
+      b.dataset.tip = TT.pp_go + " · " + x.tmux;
       b.onclick = async () => say("lv-log", (await post("live", {do: "show", target: x.tmux})).log);
       row.append(b);
     }
@@ -5931,7 +5935,8 @@ async function loadLive() {
   });
   $("lv-name").hidden = !r.tmux;
   $("lv-conf").hidden = !r.has_tmux;
-  $("lv-conf").textContent = r.conf ? TT.pp_tm_conf_off : TT.pp_tm_conf_on;
+  $("lv-conf").dataset.tip = r.conf ? TT.pp_tm_conf_off : TT.pp_tm_conf_on;
+  $("lv-conf").setAttribute("aria-pressed", r.conf ? "true" : "false");
 }
 $("lv-name").onclick = async () => { say("lv-log", (await post("live", {do: "name"})).log); loadLive(); };
 $("lv-conf").onclick = async () => {
@@ -5990,8 +5995,9 @@ def live_html():
     from html import escape
     e = lambda k: escape(t(k))
     return (f'<section class="panel live" id="live"><div class="lhead"><h2 data-tip="{tip(t("pp_live_tip"))}">{icon("term")}{e("pp_live")}</h2>'
-            f'<span class="dim" id="lv-sum"></span><button class="ghost" id="lv-name" hidden>{e("pp_tm_name")}</button>'
-            f'<button class="ghost" id="lv-conf" hidden></button></div><div class="list" id="lv-list"></div>'
+            f'<span class="dim" id="lv-sum"></span><button class="ib raised" type="button" id="lv-name" data-tip="{e("pp_tm_name")}" hidden>'
+            f'{icon("pen")}</button><button class="ib raised" type="button" id="lv-conf" aria-pressed="false" hidden>{icon("sliders")}</button>'
+            f'</div><div class="list" id="lv-list"></div>'
             f'<pre class="log" id="lv-log" hidden></pre></section>')
 
 
