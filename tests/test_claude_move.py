@@ -203,6 +203,7 @@ class Usage(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)  # cleanups run last first, so a panel started later is stopped before this
         self.home = Path(self.tmp.name)
         self.root = self.home / "sessions"
         self.desk = self.home / "desk"
@@ -229,7 +230,7 @@ class Usage(unittest.TestCase):
         self.transcript = t
 
     def tearDown(self):
-        self.tmp.cleanup()
+        pass
 
     def run_tool(self, *args, stdin=None, **env_extra):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
@@ -728,8 +729,9 @@ class Plan(unittest.TestCase):
 
 class Panel(unittest.TestCase):
     """panel: token-gated local server; the switch button checks who is signed in, then quits, moves, reopens."""
-    setUp, tearDown, run_tool = Usage.setUp, Usage.tearDown, Usage.run_tool
+    setUp, run_tool = Usage.setUp, Usage.run_tool
     S1, S2 = Terminal.S1, Terminal.S2
+    tearDown = Usage.tearDown
 
     def start(self, *extra, **env_extra):
         import re
@@ -742,7 +744,8 @@ class Panel(unittest.TestCase):
         env.update(env_extra)
         self.proc = subprocess.Popen([sys.executable, str(TOOL), "panel", "--no-open", *extra], stdout=subprocess.PIPE, text=True,
                                      encoding="utf-8", env=env)
-        self.addCleanup(lambda: (self.proc.kill(), self.proc.wait(), self.proc.stdout.close()))
+        proc = self.proc
+        self.addCleanup(lambda: (proc.kill(), proc.wait(), proc.stdout.close()))  # before the folder goes (see Usage.setUp)
         line = self.proc.stdout.readline()
         m = re.search(r"http://127\.0\.0\.1:(\d+)/\?t=(\S+)", line)
         self.port, self.token = int(m.group(1)), m.group(2)
