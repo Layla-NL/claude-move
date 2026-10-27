@@ -5014,13 +5014,29 @@ def tmux(*a):
 
 
 def tmux_panes():
+    """pane pid -> (target, the window's name when someone other than tmux or claude-move named it)."""
     panes = {}
-    out = tmux("list-panes", "-a", "-F", "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}")
-    for line in (out or "").splitlines():
+    fmt = "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}\t#{window_name}\t#{automatic-rename}\t#{@cm_named}"
+    for line in (tmux("list-panes", "-a", "-F", fmt) or "").splitlines():
         p = line.split("\t")
-        if len(p) == 2 and p[0].isdigit():
-            panes[int(p[0])] = p[1]
+        if len(p) == 5 and p[0].isdigit():
+            panes[int(p[0])] = (p[1], p[2] if p[3] != "1" and p[4] != "1" else "")
     return panes
+
+
+def index_titles():
+    """session id -> (title the user gave, title Claude Code gave) from the search index, if there is one; read only."""
+    import sqlite3
+    if not INDEX.exists():
+        return {}
+    try:
+        db = sqlite3.connect(f"file:{INDEX.as_posix()}?mode=ro", uri=True, timeout=2)
+        try:
+            return {sid: (t1, t2) for sid, t1, t2 in db.execute("SELECT sid, title, ai FROM files")}
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return {}
 
 
 def parent_pids():
@@ -5039,7 +5055,7 @@ def parent_pids():
 def live_sessions(extra=()):
     """Claude Code sessions running now, from each CLI login's sessions/<pid>.json (Claude Code's own record of its
     running processes), with the tmux pane each runs in. Busy first, then the most recently active."""
-    nm, panes = names(), tmux_panes()
+    nm, panes, titles = names(), tmux_panes(), index_titles()
     pp = parent_pids() if panes else {}
     out, seen = [], set()
     for cfg in cli_configs(extra):
@@ -5060,11 +5076,16 @@ def live_sessions(extra=()):
             except OSError:
                 last = 0
             cwd = str(d.get("cwd") or "")
+            target, window = panes.get(up, ("", ""))
+            given, ai = titles.get(sid, (None, None))
+            # a name the user gave, then the session's title, then the window's name firstmate gave, then Claude Code's
+            title = (d.get("nameSource") == "user" and d.get("name")) or given or window or ai or d.get("name") or (
+                first_prompt(tr) if tr else "")
             out.append({"pid": pid, "sid": sid, "acct": acct, "name": nm.get(acct, acct[:8]), "cfg": str(cfg),
-                        "title": str(d.get("name") or "") or (first_prompt(tr) if tr else ""), "status": str(d.get("status") or ""),
+                        "title": str(title), "status": str(d.get("status") or ""),
                         "cwd": cwd, "project": short(Path(cwd)) if cwd else "", "started": (d.get("startedAt") or 0) / 1000,
                         "active": max(last, (d.get("updatedAt") or 0) / 1000), "rc": bool(d.get("bridgeSessionId")),
-                        "tmux": panes.get(up, "")})
+                        "tmux": target})
     return sorted(out, key=lambda r: (r["status"] != "busy", -r["active"]))
 
 

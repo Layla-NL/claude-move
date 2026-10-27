@@ -611,7 +611,7 @@ class Terminal(unittest.TestCase):
     def tmux_stub(self, pane_pid):
         self.tlog = self.home / "tmux.log"
         return stub(self.home / "tmux", f"a = sys.argv[1:]\nopen({str(self.tlog)!r}, 'a').write(json.dumps(a) + '\\n')\n"
-                    f"out = {{'list-panes': '{pane_pid}\\tw:1.0', 'list-windows': 'w:1\\t1\\t1\\t\\tzsh\\nw:3\\t1\\t0\\t\\tfm-crew',"
+                    f"out = {{'list-panes': '{pane_pid}\\tw:1.0\\tzsh\\t1\\t', 'list-windows': 'w:1\\t1\\t1\\t\\tzsh\\nw:3\\t1\\t0\\t\\tfm-crew',"
                     " 'list-sessions': 'w', 'list-clients': '100\\t/dev/ttys001', 'new-window': 'w:2'}\n"
                     "print(out.get(a[0], ''))\n")
 
@@ -690,6 +690,9 @@ class Terminal(unittest.TestCase):
         self.run_tool("tmux", "menu", CLAUDE_MOVE_TMUX=tm)
         menu = [c for c in self.tmux_calls() if c[0] == "display-menu"][0]
         self.assertIn("switch-client -t w:1.0", menu)
+        # once the search index knows the session's own title, that names it rather than Claude Code's derived name
+        self.run_tool("find", "x", CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(json.loads(self.run_tool("ps", "--json", CLAUDE_MOVE_TMUX=tm).stdout)[0]["title"], "Login fixes")
         # term opens a tmux window when tmux is running
         r = self.run_tool("term", "first", CLAUDE_MOVE_TMUX=tm, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
         self.assertIn("tmux window w:2", r.stdout)

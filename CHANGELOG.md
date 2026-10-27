@@ -3,7 +3,7 @@
 ## 0.8.0
 - `find <words>`: search what was said in every CLI login's terminal sessions (prompts, replies, titles; not tool output) through an index in `~/.cache/claude-move/search.db` (mode 0600) that reads each transcript once and then only what is appended. Hits show account, project, a snippet, whether the session is running, and how to resume it.
 - `resume <id> [--to <account>] [--here]`: resume a terminal session in its folder with its login, in a new tmux window or terminal window; `--to` copies it to another CLI login first. A running session is not started twice.
-- `ps [--go <target>]`: the Claude Code sessions running now across every CLI login, read from Claude Code's own `sessions/<pid>.json`, with busy/idle and the tmux pane each runs in; `--go` brings one up.
+- `ps [--go <target>]`: the Claude Code sessions running now across every CLI login, read from Claude Code's own `sessions/<pid>.json`, with busy/idle and the tmux pane each runs in; `--go` brings one up. Each is named by the name you gave it, else its title, else the window name firstmate gave it.
 - `tmux name|line|menu|conf`: name tmux windows after the account and session in them (only windows nobody else named), a status bar line, a session menu, and a `~/.tmux.conf` block (`conf --install`, backed up first; `conf --remove`).
 - `term` and the panel's terminal buttons open a tmux window when tmux is running.
 - The panel lists running terminal sessions under the cards, with Go there and the tmux buttons, and its search box also finds terminal sessions by what was said, with Resume.
