@@ -575,6 +575,142 @@ class Firstmate(unittest.TestCase):
         self.assertIn('class="crewmark"', Panel.call(self, f"/?t={self.token}", token=False)[1])
 
 
+def said(kind, text, sec, **extra):
+    content = text if kind == "user" and isinstance(text, (str, list)) else [{"type": "text", "text": text}]
+    return dict({"type": kind, "timestamp": iso(sec), "cwd": extra.pop("cwd", ""), "message": {"role": kind, "content": content}}, **extra)
+
+
+class Terminal(unittest.TestCase):
+    """find searches what was said in every CLI login's transcripts; resume, ps and tmux work on terminal sessions."""
+    setUp, tearDown, run_tool = Usage.setUp, Usage.tearDown, Usage.run_tool
+    S1, S2 = "1111aaaa-0000-0000-0000-000000000001", "2222bbbb-0000-0000-0000-000000000002"
+
+    def prepare(self):
+        self.first, self.second = self.home / ".claude-first", self.home / ".claude-second"
+        for c, acct in ((self.first, self.a), (self.second, self.b)):
+            c.mkdir()
+            (c / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": acct}}))
+        self.run_tool("name", "aaaa", "first")
+        self.run_tool("name", "bbbb", "second")
+        self.proj = self.home / "proj"
+        self.proj.mkdir()
+        cwd = str(self.proj)
+        self.t1 = self.first / "projects/-proj" / f"{self.S1}.jsonl"
+        self.t1.parent.mkdir(parents=True)
+        lines = [said("user", "Fix the 登录 page", self.now - 900, cwd=cwd),
+                 said("assistant", "The login form now checks the password.", self.now - 890, cwd=cwd),
+                 said("user", [{"type": "tool_result", "content": "toolword in a file"}], self.now - 880, cwd=cwd),
+                 said("user", "metaword", self.now - 870, cwd=cwd, isMeta=True),
+                 said("user", "<command-name>/clear</command-name> wrapword", self.now - 860, cwd=cwd),
+                 {"type": "custom-title", "customTitle": "Login fixes", "sessionId": self.S1}]
+        self.t1.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines), encoding="utf-8")
+        t2 = self.second / "projects/-proj" / f"{self.S2}.jsonl"
+        t2.parent.mkdir(parents=True)
+        t2.write_text(json.dumps(said("user", "Something unrelated", self.now - 100, cwd=cwd)) + "\n", encoding="utf-8")
+
+    def tmux_stub(self, pane_pid):
+        self.tlog = self.home / "tmux.log"
+        return stub(self.home / "tmux", f"a = sys.argv[1:]\nopen({str(self.tlog)!r}, 'a').write(json.dumps(a) + '\\n')\n"
+                    f"out = {{'list-panes': '{pane_pid}\\tw:1.0', 'list-windows': 'w:1\\t1\\t1\\t\\tzsh\\nw:3\\t1\\t0\\t\\tfm-crew',"
+                    " 'list-sessions': 'w', 'list-clients': '100\\t/dev/ttys001', 'new-window': 'w:2'}\n"
+                    "print(out.get(a[0], ''))\n")
+
+    def tmux_calls(self):
+        return [json.loads(x) for x in self.tlog.read_text(encoding="utf-8").splitlines()] if self.tlog.exists() else []
+
+    def test_find_reads_what_was_said_and_resume_opens_it(self):
+        self.prepare()
+        r = self.run_tool("find", "登录", CLAUDE_MOVE_TMUX="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Login fixes", r.stdout)
+        self.assertIn("first", r.stdout)
+        self.assertIn("claude-move resume 1111aaaa", r.stdout)
+        self.assertIn("1 terminal sessions", r.stdout)
+        self.assertIn("password", self.run_tool("find", "LOGIN", "form", CLAUDE_MOVE_TMUX="0").stdout)  # any case, all words
+        for word in ("toolword", "metaword", "wrapword"):  # tool output and the CLI's own notes are not what was said
+            self.assertIn("No terminal session", self.run_tool("find", word, CLAUDE_MOVE_TMUX="0").stdout)
+        self.assertIn("No terminal session", self.run_tool("find", "login", "unrelated", CLAUDE_MOVE_TMUX="0").stdout)
+        self.assertIn("No terminal session", self.run_tool("find", "50%_", CLAUDE_MOVE_TMUX="0").stdout)  # LIKE wildcards are literal
+        # the index only reads what is new; a rewritten file is read again
+        with open(self.t1, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(said("user", "newword later", self.now - 10, cwd=str(self.proj))) + "\n")
+        self.assertIn("Login fixes", self.run_tool("find", "newword", CLAUDE_MOVE_TMUX="0").stdout)
+        self.assertIn("unrelated", self.run_tool("find", "unrelated", "--account", "second", CLAUDE_MOVE_TMUX="0").stdout)
+        self.assertIn("No terminal session", self.run_tool("find", "unrelated", "--account", "first", CLAUDE_MOVE_TMUX="0").stdout)
+        self.assertEqual(oct(os.stat(self.home / ".cache/claude-move/search.db").st_mode & 0o777), "0o600") if not WIN else None
+
+        env = dict(CLAUDE_MOVE_TERM_CMD=NOOP, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
+        r = self.run_tool("resume", "1111", **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("as first", r.stdout)
+        script = (self.home / f".config/claude-move/term/resume-1111aaaa{SCRIPT}").read_text(encoding="utf-8")
+        self.assertIn(str(self.first), script)
+        self.assertIn(f"--resume {self.S1}", script)
+        self.assertIn(str(self.proj), script)
+        # --to copies it to the other login first; the first keeps its own
+        r = self.run_tool("resume", "1111", "--to", "second", **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.second / "projects/-proj" / f"{self.S1}.jsonl").exists())
+        self.assertTrue(self.t1.exists())
+        self.assertIn(str(self.second), (self.home / f".config/claude-move/term/resume-1111aaaa{SCRIPT}").read_text(encoding="utf-8"))
+        self.assertNotEqual(self.run_tool("resume", "9999", **env).returncode, 0)
+        # a session that is running is not started twice
+        write(self.first / "sessions" / f"{os.getpid()}.json", pid=os.getpid(), sessionId=self.S1, cwd=str(self.proj),
+              status="busy", name="login work", startedAt=int(self.now * 1000))
+        r = self.run_tool("resume", "1111", **env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("already running", r.stderr)
+        self.assertIn("running (pid", self.run_tool("find", "登录", CLAUDE_MOVE_TMUX="0").stdout)
+
+    @unittest.skipIf(WIN, "tmux")
+    def test_ps_and_tmux(self):
+        self.prepare()
+        write(self.first / "sessions" / f"{os.getpid()}.json", pid=os.getpid(), sessionId=self.S1, cwd=str(self.proj),
+              status="busy", name="login work", startedAt=int(self.now * 1000))
+        write(self.second / "sessions" / "999999.json", pid=999999, sessionId=self.S2, status="idle")  # ended
+        (self.first / "sessions" / f"{os.getpid()}.abc.key").write_text("not read")
+        tm = str(self.tmux_stub(os.getpid()))
+        r = self.run_tool("ps", CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("1 Claude Code sessions running, 1 busy", r.stdout)
+        self.assertIn("w:1.0", r.stdout)
+        self.assertIn("login work", r.stdout)
+        rows = json.loads(self.run_tool("ps", "--json", CLAUDE_MOVE_TMUX=tm).stdout)
+        self.assertEqual([(x["name"], x["status"], x["tmux"]) for x in rows], [("first", "busy", "w:1.0")])
+        r = self.run_tool("ps", "--go", "1111", CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(["switch-client", "-c", "/dev/ttys001", "-t", "w:1.0"], self.tmux_calls())
+        self.assertNotEqual(self.run_tool("ps", "--go", "nope", CLAUDE_MOVE_TMUX=tm).returncode, 0)
+        # windows nobody named get the account and session; firstmate's own names stay
+        self.tlog.unlink()
+        self.assertEqual(self.run_tool("tmux", "line", CLAUDE_MOVE_TMUX=tm).stdout.strip(), "first 1 ●1")
+        calls = self.tmux_calls()
+        self.assertIn(["rename-window", "-t", "w:1", "● first·login work"], calls)
+        self.assertFalse([c for c in calls if "w:3" in c])
+        self.run_tool("tmux", "menu", CLAUDE_MOVE_TMUX=tm)
+        menu = [c for c in self.tmux_calls() if c[0] == "display-menu"][0]
+        self.assertIn("switch-client -t w:1.0", menu)
+        # term opens a tmux window when tmux is running
+        r = self.run_tool("term", "first", CLAUDE_MOVE_TMUX=tm, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
+        self.assertIn("tmux window w:2", r.stdout)
+        self.assertTrue([c for c in self.tmux_calls() if c[0] == "new-window" and "first" in c])
+        # the ~/.tmux.conf block: shown, added after a backup, taken out again
+        conf = self.home / ".tmux.conf"
+        conf.write_text("set -g history-limit 5000\n", encoding="utf-8")
+        self.assertIn("status-right", self.run_tool("tmux", "conf", CLAUDE_MOVE_TMUX=tm).stdout)
+        self.assertEqual(conf.read_text(encoding="utf-8"), "set -g history-limit 5000\n")
+        r = self.run_tool("tmux", "conf", "--install", CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = conf.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("set -g history-limit 5000\n# >>> claude-move"))
+        self.assertIn("tmux line", text)
+        self.assertEqual(len(list((self.home / ".config/claude-move/backups").glob("tmux.conf-*"))), 1)
+        self.assertIn("already has it", self.run_tool("tmux", "conf", "--install", CLAUDE_MOVE_TMUX=tm).stdout)
+        self.run_tool("tmux", "conf", "--remove", CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(conf.read_text(encoding="utf-8"), "set -g history-limit 5000\n")
+        self.assertIn(["set-option", "-gu", "mouse"], self.tmux_calls())
+
+
 class Plan(unittest.TestCase):
     def test_plan_names(self):
         import importlib.machinery, importlib.util
@@ -589,7 +725,8 @@ class Plan(unittest.TestCase):
 
 class Panel(unittest.TestCase):
     """panel: token-gated local server; the switch button checks who is signed in, then quits, moves, reopens."""
-    setUp, tearDown = Usage.setUp, Usage.tearDown
+    setUp, tearDown, run_tool = Usage.setUp, Usage.tearDown, Usage.run_tool
+    S1, S2 = Terminal.S1, Terminal.S2
 
     def start(self, *extra, **env_extra):
         import re
@@ -746,6 +883,24 @@ class Panel(unittest.TestCase):
         self.assertEqual([(x["acct"], x["id"]) for x in json.loads(out)["sessions"]], [(self.a, "local_7")])
         self.assertEqual(self.call("/api/search?q=")[0], 400)
         self.assertEqual(self.call("/api/search?q=" + "x" * 81)[0], 400)
+
+    def test_panel_terminal_sessions(self):
+        Terminal.prepare(self)
+        write(self.first / "sessions" / f"{os.getpid()}.json", pid=os.getpid(), sessionId=self.S2, cwd=str(self.proj), status="idle")
+        self.start()
+        page = self.call(f"/?t={self.token}", token=False)[1]
+        self.assertIn('id="live"', page)
+        out = json.loads(self.call("/api/search?" + urllib.parse.urlencode({"q": "登录"}))[1])
+        self.assertEqual([(x["sid"], x["name"], x["title"]) for x in out["cli"]], [(self.S1, "first", "Login fixes")])
+        self.assertIn(f"claude --resume {self.S1}", out["cli"][0]["cmd"])
+        live = json.loads(self.call("/api/live")[1])
+        self.assertEqual([(x["sid"], x["status"]) for x in live["rows"]], [(self.S2, "idle")])
+        self.assertEqual(self.call("/api/live", {"do": "show", "target": "x:1"})[0], 400)
+        self.assertEqual(self.call("/api/resume", {"sid": "../../etc"})[0], 400)
+        out = json.loads(self.call("/api/resume", {"sid": self.S1})[1])
+        self.assertTrue(out["ok"], out)
+        self.assertTrue((self.home / "term").exists())
+        self.assertFalse(json.loads(self.call("/api/resume", {"sid": self.S2})[1])["ok"])  # it is running
 
     def test_demo_reads_nothing_and_does_nothing(self):
         self.start("--demo")
@@ -1026,6 +1181,6 @@ class Windows(unittest.TestCase):
 class Help(unittest.TestCase):
     def test_every_help_renders(self):
         for args in ([], ["list"], ["sessions"], ["name"], ["to"], ["undo"], ["import-cli"], ["usage"], ["panel"], ["app"], ["term"], ["run"], ["notify"], ["doctor"], ["watch"],
-                     ["quota-snapshot"], ["fm-pin"]):
+                     ["quota-snapshot"], ["fm-pin"], ["find"], ["resume"], ["ps"], ["tmux"]):
             r = subprocess.run([sys.executable, str(TOOL), *args, "--help"], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, (args, r.stderr[-300:]))

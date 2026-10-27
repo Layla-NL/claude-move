@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+- `find <words>`: search what was said in every CLI login's terminal sessions (prompts, replies, titles; not tool output) through an index in `~/.cache/claude-move/search.db` (mode 0600) that reads each transcript once and then only what is appended. Hits show account, project, a snippet, whether the session is running, and how to resume it.
+- `resume <id> [--to <account>] [--here]`: resume a terminal session in its folder with its login, in a new tmux window or terminal window; `--to` copies it to another CLI login first. A running session is not started twice.
+- `ps [--go <target>]`: the Claude Code sessions running now across every CLI login, read from Claude Code's own `sessions/<pid>.json`, with busy/idle and the tmux pane each runs in; `--go` brings one up.
+- `tmux name|line|menu|conf`: name tmux windows after the account and session in them (only windows nobody else named), a status bar line, a session menu, and a `~/.tmux.conf` block (`conf --install`, backed up first; `conf --remove`).
+- `term` and the panel's terminal buttons open a tmux window when tmux is running.
+- The panel lists running terminal sessions under the cards, with Go there and the tmux buttons, and its search box also finds terminal sessions by what was said, with Resume.
+
 ## 0.7.0
 - `quota-snapshot`: one account's official numbers in quota-axi's cache format (schema 3, one keyless Claude row: `five_hour`, `seven_day`, `model:<id>` weeks, `refreshedAt` when `/usage` answered), for firstmate's quota-axi through `QUOTA_AXI_SNAPSHOT`. Written atomically, mode 0600, logged in `~/.cache/claude-move/quota-snapshot.log`. Without official numbers it writes nothing and exits non-zero; when `/usage` keeps failing and the numbers are an hour old, the file is moved aside so firstmate sees no quota rather than old quota. `schedule` refreshes it every 10 minutes (a launchd agent on macOS, a scheduled task on Windows), asking the other logins' `/usage` once an hour; the status line recorder in the pinned login also rewrites it, at most once a minute.
 - `fm-pin [<account>]`: lists the CLI logins with their official numbers, or pins firstmate's Claude crews to one (`config/claude-account`) after checking it answers `/usage` and is not cooling; the snapshot follows the pin.

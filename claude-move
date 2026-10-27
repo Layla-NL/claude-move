@@ -26,6 +26,10 @@ Usage:
   claude-move watch install|uninstall
   claude-move quota-snapshot [write|status|schedule|unschedule] [--account A] [--out FILE] [--refresh] [--every MIN]
   claude-move fm-pin [<account>] [--home DIR] [--force]
+  claude-move find <words> [--account A] [--limit N]
+  claude-move resume <session id> [--to <account>] [--here]
+  claude-move ps [--go <tmux target | session id>] [--json]
+  claude-move tmux [name|line|menu|conf] [--install|--remove]
 <account> is a label you gave with `name`, or the first characters of the account id.
 """
 import argparse
@@ -40,7 +44,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 WIN = sys.platform == "win32"
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
@@ -379,8 +383,9 @@ T = {
     "pp_next_tip": ("When each official limit resets; red runs until a cooling account is back", "每项官方额度几点重置；红条是冷却到几点"),
     "pp_ticks": ("now,1h,5h,1d,3d,7d", "现在,1小时,5小时,1天,3天,7天"),
     "pp_search": ("Search sessions", "搜会话"),
-    "pp_search_tip": ("Desktop sessions of every account, by title", "按标题搜所有号在桌面 App 里的会话"),
-    "pp_search_none": ("No session title has that.", "没有标题里带这个的会话。"),
+    "pp_search_tip": ("Desktop sessions by title, and terminal sessions of every CLI login by what was said",
+                      "桌面会话按标题搜；终端会话按聊过的内容搜，所有命令行登录都算"),
+    "pp_search_none": ("No session has that.", "没有会话里有这个。"),
     "pp_bring": ("Copy to {a}, the account the desktop app is signed into (closes and reopens the app)",
                  "拷到桌面 App 现在登录的 {a}（会关掉再重开 App）"),
     "pp_keys": ("Keys: 1–9 open that card's terminal · / search · R refresh · Esc close",
@@ -448,6 +453,54 @@ T = {
     "pt_crew_sched_on": ("Refresh every 10 min", "开定时刷新（10 分钟）"),
     "pt_crew_sched_off": ("Stop the scheduled refresh", "关定时刷新"),
     "pp_crew": ("firstmate's crews use this account", "firstmate 的船员在用这个号"),
+    "f_none": ("No terminal session has \"{q}\".", "没有终端会话里有“{q}”。"),
+    "f_head": ("{n} terminal sessions with \"{q}\", newest first:", "{n} 个终端会话里有“{q}”，新的在前："),
+    "f_indexing": ("Reading every CLI login's transcripts once; later searches only read what is new...",
+                   "第一次要把所有命令行登录的会话记录读一遍，之后只读新增的……"),
+    "f_live": ("running in {w}", "正在 {w} 里跑"),
+    "f_live_pid": ("running (pid {p})", "正在跑（进程 {p}）"),
+    "f_also": ("also in {a}", "{a} 里也有一份"),
+    "rs_none": ("No terminal session id starts with \"{i}\".", "没有 ID 以“{i}”开头的终端会话。"),
+    "rs_many": ("\"{i}\" matches several sessions; give more of the id: {l}", "“{i}”对上了好几个会话，多给几位：{l}"),
+    "rs_live": ("That session is already running ({w}); go there instead: claude-move ps --go {i}",
+                "这个会话已经在跑了（{w}），直接过去：claude-move ps --go {i}"),
+    "rs_nocwd": ("Its project folder is gone: {d}", "它的项目目录已经没了：{d}"),
+    "rs_copied": ("Copied it to {b}; {a} keeps its own copy.", "已复制到 {b}，{a} 那份还在。"),
+    "rs_open": ("Resumed \"{s}\" as {a} in {w}.", "已在 {w} 用 {a} 接着跑“{s}”。"),
+    "rs_term": ("a new terminal window", "新的终端窗口"),
+    "ps_none": ("No Claude Code session is running.", "现在没有在跑的 Claude Code 会话。"),
+    "ps_head": ("{n} Claude Code sessions running, {b} busy:", "{n} 个 Claude Code 会话在跑，{b} 个在忙："),
+    "ps_busy": ("busy", "忙"),
+    "ps_idle": ("idle", "空闲"),
+    "ps_go_none": ("No running session matches \"{i}\".", "没有对得上“{i}”的运行中会话。"),
+    "ps_go_notmux": ("That session is not in tmux (pid {p}); its terminal window is open somewhere else.",
+                     "这个会话不在 tmux 里（进程 {p}），它的终端窗口开在别处。"),
+    "ps_shown": ("Showing {w}.", "已切到 {w}。"),
+    "tm_none": ("tmux is not running, or not installed.", "tmux 没在跑，或者没装。"),
+    "tm_named": ("Named {n} tmux windows.", "给 {n} 个 tmux 窗口起了名。"),
+    "tm_menu": ("Claude sessions", "Claude 会话"),
+    "tm_menu_none": ("No Claude session in tmux", "tmux 里没有 Claude 会话"),
+    "tm_conf_show": ("This block goes into {p} (claude-move tmux conf --install adds it, --remove takes it out):",
+                     "下面这段会加进 {p}（claude-move tmux conf --install 加上，--remove 去掉）："),
+    "tm_conf_on": ("Added the claude-move block to {p}: mouse on, sessions in the status bar, prefix + S for a session menu.",
+                   "已把 claude-move 那段加进 {p}：开鼠标、状态栏显示会话数、前缀键 + S 弹出会话菜单。"),
+    "tm_conf_off": ("Took the claude-move block out of {p} and put tmux's defaults back.", "已从 {p} 去掉 claude-move 那段，tmux 恢复默认。"),
+    "tm_conf_bk": ("The old file is saved as {p}.", "原文件存为 {p}。"),
+    "tm_conf_same": ("{p} already has it.", "{p} 里已经有了。"),
+    "tm_conf_absent": ("{p} has no claude-move block.", "{p} 里没有 claude-move 那段。"),
+    "t_open_tmux": ("Opened tmux window {w} running Claude Code as {a} in {d} ({c})", "已打开 tmux 窗口 {w}，用 {a} 在 {d} 运行 Claude Code（{c}）"),
+    "pp_live": ("Terminal sessions", "终端会话"),
+    "pp_live_tip": ("Claude Code sessions running on this Mac, from every CLI login, busy first. Go there opens its tmux window.",
+                    "这台电脑上正在跑的 Claude Code 会话，所有命令行登录都算，忙的在前。“过去”会打开它所在的 tmux 窗口。"),
+    "pp_live_sum": ("{n} running · {b} busy", "{n} 个在跑 · {b} 个在忙"),
+    "pp_go": ("Go there", "过去"),
+    "pp_resume": ("Resume", "接着做"),
+    "pp_copy_cmd": ("Copy the command", "复制命令"),
+    "pp_cli_tag": ("terminal", "终端"),
+    "pp_tm_name": ("Name tmux windows", "给 tmux 窗口起名"),
+    "pp_tm_conf_on": ("Add tmux settings", "装 tmux 设置"),
+    "pp_tm_conf_off": ("Remove tmux settings", "撤掉 tmux 设置"),
+    "pp_tm_conf_confirm": ("Add this to {p}? The old file is backed up first.\n\n{b}", "把下面这段加进 {p}？会先备份原文件。\n\n{b}"),
 }
 
 
@@ -476,6 +529,8 @@ TW = {
                   "现在关掉桌面 App（它 Code 页里正在跑的会停下），把会话搬到 {a}？"),
     "pt_move_confirm": ("The desktop app has to be closed while moving (anything running in its Code tab stops): close it now, move, and reopen it?",
                         "搬的时候桌面 App 要关着（它 Code 页里正在跑的会停下）：现在关掉、搬完再重新打开？"),
+    "pp_live_tip": ("Claude Code sessions running on this computer, from every CLI login, busy first.",
+                    "这台电脑上正在跑的 Claude Code 会话，所有命令行登录都算，忙的在前。"),
     "u_notes": ("Use is priced at API list prices only to compare accounts; it counts Claude Code on this computer, not claude.ai chat or other devices.",
                 "用量按 API 价折算，只用来比较几个号谁用得多；只算这台电脑上的 Claude Code，网页聊天和别的设备上的用量算不进来。"),
 }
@@ -1231,8 +1286,9 @@ def open_terminal(cfg, rc=False, auto=False):
     else:
         env = {"CLAUDE_CONFIG_DIR": None if cfg == HOME / ".claude" else cfg}
         argv = [exe] + (["--remote-control", rc_name(cli_account(cfg))] if rc else [])
-    open_command(term_script(cfg.name.lstrip(".") + ("-rc" if rc else "") + ("-auto" if auto else ""), cwd, env, argv))
-    return cwd
+    win = open_window(term_script(cfg.name.lstrip(".") + ("-rc" if rc else "") + ("-auto" if auto else ""), cwd, env, argv),
+                      rc_name(cli_account(cfg)))
+    return cwd, win
 
 
 def console_python():
@@ -1265,13 +1321,18 @@ def term_script(name, cwd, env, argv, before=(), after=()):
     return CONF / "term" / (name + ".command"), "\n".join(lines) + "\n"
 
 
-def open_command(script_body):
-    """Open a term_script in a new terminal window. On Windows the window stays open after it ends, as Terminal's does."""
-    from shlex import quote
+def write_script(script_body):
     script, body = script_body
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_bytes(body.encode("utf-8"))
     script.chmod(0o700)
+    return script
+
+
+def open_command(script_body):
+    """Open a term_script in a new terminal window. On Windows the window stays open after it ends, as Terminal's does."""
+    from shlex import quote
+    script = write_script(script_body)
     cmd = os.environ.get("CLAUDE_MOVE_TERM_CMD")
     if cmd:
         subprocess.run(f'{cmd} "{script}"' if WIN else f"{cmd} {quote(str(script))}", shell=True)
@@ -1286,10 +1347,10 @@ def cmd_term(args):
     if not cfg:
         sys.exit(t("t_none", t=args.account))
     acct = cli_account(cfg)
-    cwd = open_terminal(cfg, args.rc, args.auto)
+    cwd, win = open_terminal(cfg, args.rc, args.auto)
     cmd = f"claude-move run {rc_name(acct)}" + (" --rc" if args.rc else "") if args.auto else (
         rc_command(cfg) if args.rc else cli_command(cfg))
-    print(t("t_open", a=names().get(acct, acct[:8]), d=short(cwd) if cwd else "~", c=cmd))
+    print(t("t_open_tmux" if win else "t_open", w=win, a=names().get(acct, acct[:8]), d=short(cwd) if cwd else "~", c=cmd))
 
 
 def cli_configs(extra=()):
@@ -1855,7 +1916,7 @@ def render_html(rep, live=None):
 <style>{PANEL_CSS}{TOOLS_CSS if live else ""}</style></head><body>{sprite}<div id="tip" role="tooltip"></div><main>
 <div class="top"><div><h1>Claude Move <span class="info" data-tip="{tip(t("u_title") + chr(10) + chr(10) + t("u_notes") + (chr(10) + chr(10) + t("pp_keys") if live else ""))}">{icon("info")}</span></h1>
 <div class="sub">{E(t("pp_demo") if live and live.get("demo") else t("u_head"))} · {E(clock(now))} · {__version__}</div></div><div class="topr">{advice}{refresh}</div></div>
-{found}{live_bar(live)}<div class="grid">{"".join(cards)}</div>{timeline}{heat}{bottom}</main>
+{found}{live_bar(live)}<div class="grid">{"".join(cards)}</div>{live_html() if live else ""}{timeline}{heat}{bottom}</main>
 <script>{PANEL_JS.replace("__DATA__", blob)}</script>{live_script(live)}</body></html>"""
 
 
@@ -1876,7 +1937,8 @@ def live_script(live):
         return ""
     texts = {k: t(k) for k in ("p_signed", "p_unknown", "p_go", "p_go_same", "p_working", "p_copied", "p_confirm",
                                "p_term_done", "p_step1", "p_step2", "pp_last", "pp_search_none", "pp_bring",
-                               "pp_theme_auto", "pp_theme_light", "pp_theme_dark")}
+                               "pp_theme_auto", "pp_theme_light", "pp_theme_dark", "pp_go", "pp_resume", "pp_copy_cmd",
+                               "pp_cli_tag")}
     return f"""<script>
 const T = {json.dumps(texts, ensure_ascii=False)}, KEY = {json.dumps(live["token"])};
 const fmt = (s, o) => s.replace(/\\{{(\\w+)\\}}/g, (_, k) => o[k] ?? "");
@@ -1951,7 +2013,22 @@ async function search() {{
   if (!v) {{ found.hidden = true; return; }}
   const r = await api("/api/search?q=" + encodeURIComponent(v));
   found.hidden = false; found.innerHTML = "";
-  if (!(r.sessions || []).length) {{ const p = document.createElement("p"); p.textContent = T.pp_search_none; found.append(p); return; }}
+  if (!(r.sessions || []).length && !(r.cli || []).length) {{
+    const p = document.createElement("p"); p.textContent = T.pp_search_none; found.append(p); return;
+  }}
+  const ib = (ic, tipText, fn) => {{
+    const b = el("button", {{className: "ib", type: "button", innerHTML: '<svg class="i"><use href="#i-' + ic + '"/></svg>'}});
+    b.dataset.tip = tipText; b.onclick = () => fn(b); return b;
+  }};
+  (r.cli || []).forEach(x => {{
+    const row = el("div", {{className: "row"}}, el("span", {{className: "who2", textContent: x.name + " · " + T.pp_cli_tag}}),
+      el("span", {{className: "t"}}, x.title, el("span", {{className: "snip", textContent: x.snippet}})), el("small", {{textContent: day(x.last)}}));
+    const tmuxed = x.live && !x.live.startsWith("pid ");
+    if (tmuxed) row.append(ib("term", T.pp_go + " · " + x.live, async () => showLog((await api("/api/live", {{do: "show", target: x.live}})).log)));
+    else if (!x.live) row.append(ib("loop", T.pp_resume, async () => {{ showLog(T.p_working); showLog((await api("/api/resume", {{sid: x.sid}})).log); }}));
+    if (x.cmd) row.append(ib("copy", T.pp_copy_cmd, b => navigator.clipboard.writeText(x.cmd).then(() => flash(b, T.p_copied))));
+    found.append(row);
+  }});
   r.sessions.forEach(x => {{
     const row = document.createElement("div");
     row.className = "row";
@@ -2116,7 +2193,7 @@ pre.log{flex-basis:100%;white-space:pre-wrap;font:12px/1.5 var(--mono);backgroun
 .found .row{display:flex;gap:10px;align-items:center;padding:4px 8px;border-radius:10px;font-size:13px}
 .found .row:hover{background:var(--hair)}
 .found .row .t{flex:1;min-width:0;overflow-wrap:anywhere}
-.found small{color:var(--dim);font:11px var(--mono)} .found .who2{font-size:12px;color:var(--dim);min-width:64px}
+.found .snip{display:block;color:var(--dim);font-size:12px} .found small{color:var(--dim);font:11px var(--mono)} .found .who2{font-size:12px;color:var(--dim);min-width:64px}
 .found p{margin:6px 8px;color:var(--dim)}
 .next{padding:16px 20px 18px}
 .next h2{margin:0 0 12px;font:600 15px var(--display);display:flex;gap:8px;align-items:center}
@@ -2739,6 +2816,8 @@ def cmd_panel(args):
                 return
 
     threading.Thread(target=idle_watch, daemon=True).start()
+    if not args.demo:
+        threading.Thread(target=index_quietly, args=(args.config or (),), daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -4606,6 +4685,571 @@ def cmd_run(args):
         cfg, resume, prompt = nxt, True, t("run_prompt")
 
 
+# ---------- terminal sessions: search every CLI login's transcripts, the running ones, tmux
+INDEX = Path(os.environ.get("CLAUDE_MOVE_INDEX") or str(HOME / ".cache/claude-move/search.db"))
+INDEX_VERSION = 1
+WANTED = re.compile(rb'"type": ?"(?:user|assistant|custom-title|ai-title)"')
+TMUX_CONF = HOME / ".tmux.conf"
+TMUX_MARK = ("# >>> claude-move", "# <<< claude-move")
+
+
+def said(rec):
+    """What a person typed or read in one transcript record: prompts and Claude's replies, not tool output,
+    attachments or the CLI's own <wrapped> notes."""
+    c = (rec.get("message") or {}).get("content")
+    if rec.get("type") == "user" and isinstance(c, str):
+        parts = [c]
+    elif isinstance(c, list):
+        parts = [x.get("text") or "" for x in c if isinstance(x, dict) and x.get("type") == "text"]
+    else:
+        parts = []
+    if rec.get("type") == "user":
+        parts = [] if rec.get("isMeta") else [p for p in parts if not p.lstrip().startswith("<")]
+    return "\n".join(p.strip() for p in parts if p.strip())
+
+
+def index_db():
+    """The search index: the said() text of every CLI transcript, kept beside the cache, readable by this user only."""
+    import sqlite3
+    INDEX.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(str(INDEX), timeout=60)
+    try:
+        os.chmod(INDEX, 0o600)
+    except OSError:
+        pass
+    db.execute("PRAGMA busy_timeout=10000")
+    db.execute("PRAGMA journal_mode=WAL")  # searches read while the panel's first build writes
+    if db.execute("PRAGMA user_version").fetchone()[0] != INDEX_VERSION:
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("PRAGMA user_version").fetchone()[0] != INDEX_VERSION:  # nobody else made it meanwhile
+            for sql in ("DROP TABLE IF EXISTS files", "DROP TABLE IF EXISTS msgs",
+                        "CREATE TABLE files(path TEXT PRIMARY KEY, cfg TEXT, sid TEXT, cwd TEXT, title TEXT, ai TEXT, "
+                        "first TEXT, off INTEGER, ino INTEGER, mtime REAL)",
+                        "CREATE TABLE msgs(path TEXT, ts REAL, role TEXT, text TEXT)", "CREATE INDEX msgs_path ON msgs(path)",
+                        f"PRAGMA user_version = {INDEX_VERSION}"):
+                db.execute(sql)
+        db.commit()
+    return db
+
+
+def index_file(db, cfg, f, st, row):
+    """Read a transcript from where the index stopped (transcripts only grow) to its last whole line."""
+    p = str(f)
+    off = row[1] if row and row[2] == st.st_ino and st.st_size >= row[1] else 0
+    if row and not off:
+        db.execute("DELETE FROM msgs WHERE path=?", (p,))
+    cwd, title, ai, first = row[3:7] if row and off else (None, None, None, None)
+    rows = []
+    with open(f, "rb") as fh:
+        fh.seek(off)
+        for raw in fh:
+            if not raw.endswith(b"\n"):  # still being written
+                break
+            off += len(raw)
+            if not WANTED.search(raw):
+                continue
+            try:
+                rec = json.loads(raw)
+            except ValueError:
+                continue
+            kind = rec.get("type") if isinstance(rec, dict) else None
+            if kind == "custom-title":
+                title = rec.get("customTitle") or title
+            elif kind == "ai-title":
+                ai = rec.get("aiTitle") or ai
+            elif kind in ("user", "assistant") and not rec.get("isSidechain"):
+                cwd = cwd or rec.get("cwd")
+                text = said(rec)
+                if text:
+                    first = first or (" ".join(text.split())[:80] if kind == "user" else None)
+                    rows.append((p, iso_ts(rec.get("timestamp")) or 0, kind, text))
+    db.executemany("INSERT INTO msgs VALUES (?,?,?,?)", rows)
+    db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?)",
+               (p, str(cfg), f.stem, cwd, title, ai, first, off, st.st_ino, st.st_mtime))
+
+
+def index_update(db, extra=()):
+    """Bring the index up to date. It holds the write lock a few files at a time, so searches see a first build fill
+    in; while another process is writing, this one leaves it to that one."""
+    import sqlite3
+
+    def lock():
+        try:
+            db.execute("PRAGMA busy_timeout=3000")
+            db.execute("BEGIN IMMEDIATE")
+            return True
+        except sqlite3.OperationalError:
+            return False
+    if not lock():
+        return
+    seen, done = set(), 0
+    for cfg in cli_configs(extra):
+        for f in cfg.glob("projects/*/*.jsonl"):
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            seen.add(str(f))
+            row = db.execute("SELECT path, off, ino, cwd, title, ai, first FROM files WHERE path=?", (str(f),)).fetchone()
+            if not row or row[1] != st.st_size or row[2] != st.st_ino:
+                try:
+                    index_file(db, cfg, f, st, row)
+                except OSError:
+                    continue
+                done += 1
+                if done % 10 == 0:
+                    db.commit()
+                    if not lock():
+                        return
+    for (p,) in db.execute("SELECT path FROM files").fetchall():
+        if p not in seen:
+            db.execute("DELETE FROM msgs WHERE path=?", (p,))
+            db.execute("DELETE FROM files WHERE path=?", (p,))
+    db.commit()
+
+
+def snippet(text, word, width=90):
+    flat = " ".join(text.split())
+    i = flat.casefold().find(word.casefold())
+    if i < 0:
+        return flat[:width]
+    a = max(0, i - width // 3)
+    return ("…" if a else "") + flat[a:a + width] + ("…" if a + width < len(flat) else "")
+
+
+def find_sessions(words, extra=(), limit=20, acct=None, live=None):
+    """Terminal sessions where every word was said (or is in the title), newest first, one row per session id."""
+    db = index_db()
+    try:
+        if not db.execute("SELECT 1 FROM files LIMIT 1").fetchone():
+            print(t("f_indexing"), file=sys.stderr, flush=True)
+        index_update(db, extra)
+        like = ["%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for w in words]
+        hit = None
+        for p in like:
+            s = {r[0] for r in db.execute("SELECT DISTINCT path FROM msgs WHERE text LIKE ? ESCAPE '\\'", (p,))}
+            s |= {r[0] for r in db.execute("SELECT path FROM files WHERE title LIKE ? ESCAPE '\\' OR ai LIKE ? ESCAPE '\\'", (p, p))}
+            hit = s if hit is None else hit & s
+        files = [db.execute("SELECT path, cfg, sid, cwd, title, ai, first, mtime FROM files WHERE path=?", (p,)).fetchone()
+                 for p in hit or ()]
+        files.sort(key=lambda r: r[7], reverse=True)
+        nm, who, by_sid = names(), {}, {}
+        for path, cfg, sid, cwd, title, ai, first, mtime in files:
+            if cfg not in who:
+                a = cli_account(Path(cfg)) or ""
+                who[cfg] = (a, nm.get(a, a[:8]))
+            if acct and who[cfg][0] != acct:
+                continue
+            if sid in by_sid:
+                if who[cfg][1] not in by_sid[sid]["also"] and who[cfg][1] != by_sid[sid]["name"]:
+                    by_sid[sid]["also"].append(who[cfg][1])
+                continue
+            if len(by_sid) >= limit:
+                continue
+            m = db.execute("SELECT ts, role, text FROM msgs WHERE path=? AND text LIKE ? ESCAPE '\\' ORDER BY ts DESC LIMIT 1",
+                           (path, like[0])).fetchone()
+            by_sid[sid] = {"sid": sid, "acct": who[cfg][0], "name": who[cfg][1], "cfg": cfg, "cwd": cwd or "",
+                           "project": short(Path(cwd)) if cwd else "", "title": title or ai or first or t("untitled"),
+                           "last": int(mtime * 1000), "said": m[1] if m else "", "snippet": snippet(m[2], words[0]) if m else "",
+                           "also": [], "live": ""}
+    finally:
+        db.close()
+    running = {r["sid"]: r for r in (live_sessions(extra) if live is None else live)}
+    for r in by_sid.values():
+        x = running.get(r["sid"])
+        r["live"] = (x["tmux"] or f"pid {x['pid']}") if x else ""
+    return list(by_sid.values())
+
+
+def resume_text(cfg, cwd, sid):
+    """The command that resumes a session by hand: its folder, its login."""
+    from shlex import quote
+    if WIN:
+        return f"cd {ps_quote(cwd)}; " + env_cmd(Path(cfg), f"claude --resume {sid}")
+    shown = short(Path(cwd))
+    shown = "~/" + quote(shown[2:]) if shown.startswith("~/") else quote(shown)
+    return f"cd {shown} && " + env_cmd(Path(cfg), f"claude --resume {sid}")
+
+
+def index_quietly(extra=()):
+    try:
+        db = index_db()
+        try:
+            index_update(db, extra)
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
+def cmd_find(args):
+    words = [w for w in " ".join(args.words).split() if w]
+    cfg = cli_dir(args.account.strip(), args.config or ()) if args.account else None
+    if args.account and not cfg:
+        sys.exit(t("t_none", t=args.account))
+    rows = find_sessions(words, args.config or (), args.limit, cli_account(cfg) if cfg else None)
+    q = " ".join(words)
+    if not rows:
+        print(t("f_none", q=q))
+        return
+    print(t("f_head", n=len(rows), q=q))
+    for r in rows:
+        tags = [t("f_live", w=r["live"]) if r["live"] and not r["live"].startswith("pid ") else
+                t("f_live_pid", p=r["live"][4:]) if r["live"] else ""] + [t("f_also", a="、".join(r["also"])) if r["also"] else ""]
+        print(f'\n{r["name"]} · {when(r["last"])} · {r["project"] or "-"} · {r["title"]}'
+              + "".join(f"  [{x}]" for x in tags if x))
+        if r["snippet"]:
+            print("    " + r["snippet"])
+        print(f'    claude-move resume {r["sid"][:8]}')
+
+
+def find_transcript(token, extra=()):
+    """The newest transcript whose session id starts with token, across every CLI login: (cfg, file) or an error."""
+    if not re.fullmatch(r"[0-9a-f-]{4,64}", token):
+        return None, t("rs_none", i=token)
+    hits = []
+    for cfg in cli_configs(extra):
+        for f in cfg.glob(f"projects/*/{token}*.jsonl"):
+            try:
+                hits.append((f.stat().st_mtime, cfg, f))
+            except OSError:
+                pass
+    sids = sorted({f.stem for _, _, f in hits})
+    if not sids:
+        return None, t("rs_none", i=token)
+    if len(sids) > 1:
+        return None, t("rs_many", i=token, l=", ".join(s[:12] for s in sids[:6]))
+    _, cfg, f = max(hits, key=lambda h: h[0])
+    return (cfg, f), None
+
+
+def transcript_cwd(f):
+    try:
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            for _, line in zip(range(200), fh):
+                try:
+                    cwd = json.loads(line).get("cwd")
+                except (ValueError, AttributeError):
+                    continue
+                if cwd:
+                    return cwd
+    except OSError:
+        pass
+    return None
+
+
+def resume_session(cfg, f, to_cfg=None, here=False, extra=()):
+    """Resume a terminal session in a new tmux window (or terminal window), in its own folder, with its login or,
+    with to_cfg, another one it is first copied to. Never two claudes on one transcript."""
+    sid = f.stem
+    live = {r["sid"]: r for r in live_sessions(extra)}.get(sid)
+    if live:
+        return False, t("rs_live", w=live["tmux"] or f'pid {live["pid"]}', i=sid[:8])
+    cwd = transcript_cwd(f)
+    if not cwd or not Path(cwd).is_dir():
+        return False, t("rs_nocwd", d=cwd or "?")
+    lines = []
+    if to_cfg and Path(to_cfg).resolve() != Path(cfg).resolve():
+        bk = copy_session(cfg, to_cfg, sid)
+        if bk is False:
+            return False, t("run_lost", d=short(cfg))
+        a, b = rc_name(cli_account(cfg)), rc_name(cli_account(to_cfg))
+        lines.append(t("rs_copied", a=a, b=b))
+        if bk:
+            lines.append(t("run_backup", b=b, p=bk))
+        cfg = to_cfg
+    exe = os.environ.get("CLAUDE_MOVE_CLAUDE") or shutil.which("claude") or "claude"
+    env = {"CLAUDE_CONFIG_DIR": None if cfg == HOME / ".claude" else cfg}
+    who, title = rc_name(cli_account(cfg)), first_prompt(f) or sid[:8]
+    if here:
+        print("\n".join(lines), file=sys.stderr)
+        e = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        e.update({k: str(v) for k, v in env.items() if v is not None})
+        os.chdir(cwd)
+        if WIN:
+            sys.exit(subprocess.call([exe, "--resume", sid], env=e))
+        os.execvpe(exe, [exe, "--resume", sid], e)
+    win = open_window(term_script(f"resume-{sid[:8]}", cwd, env, [exe, "--resume", sid]), f"{who}·{title[:16]}")
+    lines.append(t("rs_open", s=title, a=who, w=f"tmux {win}" if win else t("rs_term")))
+    return True, "\n".join(lines)
+
+
+def cmd_resume(args):
+    found, err = find_transcript(args.session.strip().lower(), args.config or ())
+    if err:
+        sys.exit(err)
+    to = None
+    if args.to:
+        to = cli_dir(args.to.strip(), args.config or ())
+        if not to:
+            sys.exit(t("t_none", t=args.to))
+    ok, log = resume_session(*found, to_cfg=to, here=args.here, extra=args.config or ())
+    if not ok:
+        sys.exit(log)
+    print(log)
+
+
+def tmux_bin():
+    if WIN:
+        return None
+    v = os.environ.get("CLAUDE_MOVE_TMUX")
+    if v is not None:
+        return v if v not in ("", "0") else None
+    if os.environ.get("CLAUDE_MOVE_TERM_CMD"):  # windows are opened some other way (tests)
+        return None
+    return shutil.which("tmux") or next((p for p in ("/opt/homebrew/bin/tmux", "/usr/local/bin/tmux") if os.path.exists(p)), None)
+
+
+def tmux(*a):
+    """Run one tmux command; its output, or None when tmux is missing, not running or says no."""
+    tm = tmux_bin()
+    if not tm:
+        return None
+    try:
+        r = subprocess.run([tm, *a], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def tmux_panes():
+    panes = {}
+    out = tmux("list-panes", "-a", "-F", "#{pane_pid}\t#{session_name}:#{window_index}.#{pane_index}")
+    for line in (out or "").splitlines():
+        p = line.split("\t")
+        if len(p) == 2 and p[0].isdigit():
+            panes[int(p[0])] = p[1]
+    return panes
+
+
+def parent_pids():
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    pp = {}
+    for line in out.splitlines():
+        a = line.split()
+        if len(a) == 2 and a[0].isdigit() and a[1].isdigit():
+            pp[int(a[0])] = int(a[1])
+    return pp
+
+
+def live_sessions(extra=()):
+    """Claude Code sessions running now, from each CLI login's sessions/<pid>.json (Claude Code's own record of its
+    running processes), with the tmux pane each runs in. Busy first, then the most recently active."""
+    nm, panes = names(), tmux_panes()
+    pp = parent_pids() if panes else {}
+    out, seen = [], set()
+    for cfg in cli_configs(extra):
+        acct = cli_account(cfg)
+        for f in (cfg / "sessions").glob("*.json"):
+            d = load(f)
+            pid = d.get("pid") if isinstance(d, dict) else None
+            if not isinstance(pid, int) or pid in seen or not pid_alive(pid):
+                continue
+            seen.add(pid)
+            up, hops = pid, 0
+            while up and up not in panes and hops < 40:
+                up, hops = pp.get(up), hops + 1
+            sid = str(d.get("sessionId") or "")
+            tr = next(iter(cfg.glob(f"projects/*/{sid}.jsonl")), None) if SESSION_ID.match(sid) else None
+            try:
+                last = tr.stat().st_mtime if tr else 0
+            except OSError:
+                last = 0
+            cwd = str(d.get("cwd") or "")
+            out.append({"pid": pid, "sid": sid, "acct": acct, "name": nm.get(acct, acct[:8]), "cfg": str(cfg),
+                        "title": str(d.get("name") or "") or (first_prompt(tr) if tr else ""), "status": str(d.get("status") or ""),
+                        "cwd": cwd, "project": short(Path(cwd)) if cwd else "", "started": (d.get("startedAt") or 0) / 1000,
+                        "active": max(last, (d.get("updatedAt") or 0) / 1000), "rc": bool(d.get("bridgeSessionId")),
+                        "tmux": panes.get(up, "")})
+    return sorted(out, key=lambda r: (r["status"] != "busy", -r["active"]))
+
+
+def status_text(s):
+    return t("ps_" + s) if s in ("busy", "idle") else s
+
+
+def tmux_show(target):
+    """Bring a tmux pane forward: in the terminal attached to tmux most recently, else in a new terminal window."""
+    win = target.split(".")[0]
+    if tmux("select-window", "-t", win) is None:
+        return False
+    tmux("select-pane", "-t", target)
+    clients = []
+    for line in (tmux("list-clients", "-F", "#{client_activity}\t#{client_name}") or "").splitlines():
+        a, _, c = line.partition("\t")
+        if a.isdigit() and c:
+            clients.append((int(a), c))
+    if clients:
+        tmux("switch-client", "-c", max(clients)[1], "-t", target)
+    else:
+        sess = win.split(":")[0]
+        open_command(term_script("tmux-" + (re.sub(r"[^A-Za-z0-9-]", "-", sess)[:24] or "x"), None, {},
+                                 [tmux_bin(), "attach-session", "-t", sess]))
+    return True
+
+
+def open_window(script_body, name):
+    """A new tmux window when a tmux server is running, shown; else a new terminal window. Returns the tmux target or ""."""
+    from shlex import quote
+    if tmux("list-sessions", "-F", "#{session_name}"):
+        script = write_script(script_body)
+        target = (tmux("new-window", "-P", "-F", "#{session_name}:#{window_index}", "-n", name[:30], quote(str(script))) or "").strip()
+        if target:
+            tmux("set-option", "-w", "-t", target, "@cm_named", "1")
+            tmux_show(target)
+            return target
+    open_command(script_body)
+    return ""
+
+
+def window_label(r):
+    return (("● " if r["status"] == "busy" else "") + r["name"] + "·" + (r["title"] or Path(r["cwd"]).name or r["sid"][:8]))[:30]
+
+
+def tmux_name(rows=None):
+    """Name each tmux window that holds one Claude session after its account and session, with ● while busy. Only
+    windows nobody named, or claude-move named before: firstmate's and the user's own names stay. A window claude-move
+    named goes back to tmux's automatic name once its session ends."""
+    rows = live_sessions() if rows is None else rows
+    by_win = {}
+    for r in rows:
+        if r["tmux"]:
+            by_win.setdefault(r["tmux"].split(".")[0], []).append(r)
+    n = 0
+    fmt = "#{session_name}:#{window_index}\t#{window_panes}\t#{automatic-rename}\t#{@cm_named}\t#{window_name}"
+    for line in (tmux("list-windows", "-a", "-F", fmt) or "").splitlines():
+        p = line.split("\t")
+        if len(p) != 5 or not (p[2] == "1" or p[3] == "1"):
+            continue
+        here = by_win.get(p[0], [])
+        if len(here) == 1 and p[1] == "1":
+            want = window_label(here[0])
+            if p[4] != want:
+                tmux("rename-window", "-t", p[0], want)
+                tmux("set-option", "-w", "-t", p[0], "@cm_named", "1")
+                n += 1
+        elif p[3] == "1" and not here:
+            tmux("set-option", "-w", "-t", p[0], "automatic-rename", "on")
+            tmux("set-option", "-w", "-u", "-t", p[0], "@cm_named")
+    return n
+
+
+def tmux_line(rows):
+    """The status bar text: running sessions per account, ● how many are busy."""
+    per = {}
+    for r in rows:
+        n, b = per.get(r["name"], (0, 0))
+        per[r["name"]] = (n + 1, b + (r["status"] == "busy"))
+    return " · ".join(f"{a} {n}" + (f" ●{b}" if b else "") for a, (n, b) in sorted(per.items()))
+
+
+def tmux_menu(rows):
+    keys = "123456789abcdefghijklmnopqrstuvwxyz"
+    items = []
+    for k, r in zip(keys, [r for r in rows if r["tmux"]]):
+        label = f'{"●" if r["status"] == "busy" else "○"} {r["name"]} · {r["title"] or r["project"]} · {r["tmux"]}'
+        items += [label.replace("#", "##")[:70], k, f'switch-client -t {r["tmux"]}']
+    return ["display-menu", "-T", t("tm_menu"), "-x", "C", "-y", "C"] + (items or ["-" + t("tm_menu_none"), "", ""])
+
+
+def tmux_conf_block():
+    py = "/usr/bin/python3" if sys.platform == "darwin" and os.path.exists("/usr/bin/python3") else sys.executable
+    cm = f'"{py}" "{Path(__file__).resolve()}"'
+    return "\n".join([TMUX_MARK[0] + " (claude-move tmux conf --remove takes it out)", "set -g mouse on",
+                      "set -g status-interval 15", "set -g status-right-length 120",
+                      f"set -g status-right '#({cm} tmux line) %H:%M'", f"bind-key S run-shell -b '{cm} tmux menu'",
+                      TMUX_MARK[1]]) + "\n"
+
+
+def tmux_conf_set(on):
+    """Add or take out the claude-move block in ~/.tmux.conf, backing the file up first, and apply it to a running tmux."""
+    old = TMUX_CONF.read_text(encoding="utf-8") if TMUX_CONF.exists() else ""
+    pat = re.compile(re.escape(TMUX_MARK[0]) + r".*?" + re.escape(TMUX_MARK[1]) + r"\n?", re.S)
+    has = bool(pat.search(old))
+    new = pat.sub("", old)
+    if on:
+        if old and pat.search(old) and pat.search(old).group(0) == tmux_conf_block():
+            return False, t("tm_conf_same", p=short(TMUX_CONF))
+        new = new + ("\n" if new and not new.endswith("\n") else "") + tmux_conf_block()
+    elif not has:
+        return False, t("tm_conf_absent", p=short(TMUX_CONF))
+    lines = []
+    if old:
+        bk = CONF / "backups" / f'tmux.conf-{time.strftime("%Y%m%d-%H%M%S")}'
+        bk.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(TMUX_CONF, bk)
+        lines.append(t("tm_conf_bk", p=short(bk)))
+    TMUX_CONF.write_text(new, encoding="utf-8")
+    if on:
+        tmux("source-file", str(TMUX_CONF))
+    else:
+        for opt in ("mouse", "status-interval", "status-right-length", "status-right"):
+            tmux("set-option", "-gu", opt)
+        tmux("unbind-key", "S")
+    return True, "\n".join([t("tm_conf_on" if on else "tm_conf_off", p=short(TMUX_CONF))] + lines)
+
+
+def tmux_conf_on():
+    return TMUX_CONF.exists() and TMUX_MARK[0] in TMUX_CONF.read_text(encoding="utf-8", errors="replace")
+
+
+def cmd_ps(args):
+    rows = live_sessions(args.config or ())
+    if args.go:
+        tok = args.go.strip()
+        r = next((r for r in rows if tok and (r["tmux"] == tok or r["sid"].startswith(tok) or str(r["pid"]) == tok
+                                              or r["tmux"].split(".")[0] == tok)), None)
+        if not r:
+            sys.exit(t("ps_go_none", i=tok))
+        if not r["tmux"]:
+            sys.exit(t("ps_go_notmux", p=r["pid"]))
+        if not tmux_show(r["tmux"]):
+            sys.exit(t("tm_none"))
+        print(t("ps_shown", w=r["tmux"]))
+        return
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        return
+    if not rows:
+        print(t("ps_none"))
+        return
+    print(t("ps_head", n=len(rows), b=sum(r["status"] == "busy" for r in rows)))
+    import unicodedata
+    wide = lambda x: sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in x)
+    w = [max(wide(x) for x in col) for col in zip(*[(r["name"], status_text(r["status"]), r["tmux"] or "-") for r in rows])]
+    for r in rows:
+        cols = (r["name"], status_text(r["status"]), r["tmux"] or "-")
+        print("  " + "  ".join(c + " " * (n - wide(c)) for c, n in zip(cols, w)) + f'  {r["title"] or r["sid"][:8]} · {r["project"]}'
+              + f'  ({ago(time.time() - r["started"])})' * bool(r["started"]))
+
+
+def cmd_tmux(args):
+    if args.action == "conf":
+        if not (args.install or args.remove):
+            print(t("tm_conf_show", p=short(TMUX_CONF)) + "\n\n" + tmux_conf_block(), end="")
+            return
+        ok, log = tmux_conf_set(bool(args.install))
+        print(log)
+        return
+    rows = live_sessions(args.config or ())
+    if args.action == "line":  # the status bar runs this every few seconds: never fail, print one short line
+        try:
+            tmux_name(rows)
+        except Exception:
+            pass
+        print(tmux_line(rows))
+        return
+    if not tmux("list-sessions"):
+        sys.exit(t("tm_none"))
+    if args.action == "menu":
+        tmux(*tmux_menu(rows))
+    else:
+        print(t("tm_named", n=tmux_name(rows)))
+
+
 # ---------- doctor
 def doctor_items(extra=()):
     """What doctor finds, for the terminal and the panel: section, whether it needs a look, text, and the fix the
@@ -4855,7 +5499,16 @@ def panel_api(method, path, q, body, extra=()):
                 if a["desk"]:
                     out += [dict(x, acct=a["acct"], name=a["name"]) for x in desk_sessions(a["acct"]) or []
                             if needle in x["title"].casefold()]
-            return 200, {"sessions": sorted(out, key=lambda x: x["last"], reverse=True)[:40]}
+            import sqlite3
+            try:
+                cli = [dict(x, cmd=resume_text(x["cfg"], x["cwd"], x["sid"]) if x["cwd"] else "")
+                       for x in find_sessions(needle.split(), extra, 30)]
+            except sqlite3.Error:
+                cli = []
+            return 200, {"sessions": sorted(out, key=lambda x: x["last"], reverse=True)[:40], "cli": cli}
+        if name == "live":
+            return 200, {"rows": live_sessions(extra), "tmux": bool(tmux("list-sessions")), "has_tmux": bool(tmux_bin()),
+                         "conf": tmux_conf_on(), "block": tmux_conf_block(), "path": short(TMUX_CONF)}
         if name == "cli-sessions":
             if not cfg or cfg.resolve() == DESKTOP_HOME.resolve():
                 return bad
@@ -5002,6 +5655,33 @@ def panel_api(method, path, q, body, extra=()):
             ok, log = snapshot_schedule(bool(body.get("on")), (load(SNAP_CONF) or {}).get("every", 10))
             return 200, {"ok": ok, "log": log}
         return bad
+    if name == "resume":
+        sid = str(body.get("sid") or "")
+        if not SESSION_ID.match(sid) or sid.startswith("local_"):
+            return bad
+        found, err = find_transcript(sid, extra)
+        if err:
+            return 200, {"ok": False, "log": err}
+        ok, log = resume_session(*found, extra=extra)
+        return 200, {"ok": ok, "log": log}
+    if name == "live":
+        do = body.get("do")
+        if do == "show":
+            target = str(body.get("target") or "")
+            if target not in {r["tmux"] for r in live_sessions(extra) if r["tmux"]}:
+                return bad
+            ok = tmux_show(target)
+            return 200, {"ok": ok, "log": t("ps_shown", w=target) if ok else t("tm_none")}
+        if do == "name":
+            if not tmux("list-sessions"):
+                return 200, {"ok": False, "log": t("tm_none")}
+            return 200, {"ok": True, "log": t("tm_named", n=tmux_name(live_sessions(extra)))}
+        if do == "conf":
+            if not tmux_bin():
+                return 200, {"ok": False, "log": t("tm_none")}
+            ok, log = tmux_conf_set(bool(body.get("on")))
+            return 200, {"ok": ok, "log": log}
+        return bad
     if name == "doctor":
         _, log = captured(lambda: refresh_official(extra))
         return 200, {"ok": True, "log": log, "items": doctor_items(extra)}
@@ -5015,9 +5695,14 @@ TOOLS_CSS = """
 .toolbox summary::-webkit-details-marker{display:none}
 .toolbox .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
 .toolbox select,.toolbox input[type=text]{font:inherit;font-size:13px;padding:6px 9px;border-radius:9px;border:1px solid var(--hair);background:var(--bg);color:var(--ink);max-width:100%}
-.toolbox button{font-size:13px;font-weight:600;border:0;border-radius:10px;padding:7px 12px;background:var(--btn);color:var(--btnink)}
-.toolbox button.ghost{background:var(--raise);color:var(--ink);box-shadow:var(--pill)}
-.toolbox pre.log{margin-top:10px}
+.toolbox button,.live button{font-size:13px;font-weight:600;border:0;border-radius:10px;padding:7px 12px;background:var(--btn);color:var(--btnink)}
+.toolbox button.ghost,.live button.ghost{background:var(--raise);color:var(--ink);box-shadow:var(--pill)}
+.toolbox pre.log,.live pre.log{margin-top:10px}
+.live{padding:14px 16px}
+.live .lhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.live h2{margin:0 auto 0 0;font:600 15px var(--display);display:flex;gap:8px;align-items:center}
+.live .item .st{min-width:44px;color:var(--dim)} .live .item.busy .st{color:var(--hot);font-weight:600}
+.live .item .t{flex:1;min-width:0} .live .item b{min-width:64px}
 .list{max-height:340px;overflow:auto;margin:8px 0}
 .item{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;padding:6px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}
 .item:last-child{border-bottom:0} .item.warn{color:var(--hot)} .dim{color:var(--dim)} .sub-item{padding-left:18px;color:var(--dim)}
@@ -5223,6 +5908,39 @@ $("crew-sched").onclick = async () => {
   say("crew-log", (await post("crew", {do: "schedule", on: !$("crew-sched").dataset.on})).log);
   loadCrew();
 };
+let LIVE = {};
+async function loadLive() {
+  let r;
+  try { r = await get("live"); } catch (e) { return; }
+  LIVE = r;
+  const rows = r.rows || [], box = $("lv-list");
+  box.innerHTML = "";
+  $("lv-sum").textContent = fmt(TT.pp_live_sum, {n: rows.length, b: rows.filter(x => x.status === "busy").length});
+  if (!rows.length) empty(box, TT.ps_none);
+  rows.forEach(x => {
+    const row = el("div", {className: "item" + (x.status === "busy" ? " busy" : "")}, el("b", {textContent: x.name}),
+      el("span", {className: "st", textContent: TT["ps_" + x.status] || x.status}),
+      el("span", {className: "t", textContent: (x.title || x.sid.slice(0, 8)) + " · " + x.project}),
+      el("small", {className: "dim", textContent: x.tmux}));
+    if (x.tmux) {
+      const b = el("button", {className: "ghost", textContent: TT.pp_go});
+      b.onclick = async () => say("lv-log", (await post("live", {do: "show", target: x.tmux})).log);
+      row.append(b);
+    }
+    box.append(row);
+  });
+  $("lv-name").hidden = !r.tmux;
+  $("lv-conf").hidden = !r.has_tmux;
+  $("lv-conf").textContent = r.conf ? TT.pp_tm_conf_off : TT.pp_tm_conf_on;
+}
+$("lv-name").onclick = async () => { say("lv-log", (await post("live", {do: "name"})).log); loadLive(); };
+$("lv-conf").onclick = async () => {
+  const on = !LIVE.conf;
+  if (on && !confirm(fmt(TT.pp_tm_conf_confirm, {p: LIVE.path, b: LIVE.block}))) return;
+  say("lv-log", (await post("live", {do: "conf", on})).log);
+  loadLive();
+};
+loadLive(); setInterval(loadLive, 10000);
 $("up-go").onclick = async () => { $("up-msg").textContent = TT.p_working; $("up-msg").textContent = (await get("update")).log; };
 
 const loaders = {"t-move": loadMove, "t-undo": loadUndo, "t-sess": loadSess, "t-imp": loadImp, "t-runs": loadRuns,
@@ -5234,7 +5952,8 @@ try { JSON.parse(sessionStorage.getItem("open") || "[]").forEach(id => { if ($(i
 TOOLS_KEYS = ("p_working", "no_backups", "pt_move_confirm", "pt_undo_btn", "pt_undo_confirm", "pt_undone", "pt_archived",
               "pt_in_desk", "pt_runs_none", "pt_run_line", "pt_run_switch", "pt_running", "pt_ended", "pt_fix",
               "pt_rename_ask", "pt_rec_confirm", "pt_login_ask", "pt_crew_pin", "pt_crew_pinned", "pt_crew_pin_confirm",
-              "pt_crew_sched_on", "pt_crew_sched_off")
+              "pt_crew_sched_on", "pt_crew_sched_off", "ps_none", "ps_busy", "ps_idle", "pp_live_sum", "pp_go",
+              "pp_tm_conf_on", "pp_tm_conf_off", "pp_tm_conf_confirm")
 
 
 def tools_html():
@@ -5265,6 +5984,15 @@ def tools_html():
 <details id="t-upd"><summary>{e("pt_update")}</summary><div class="row"><button class="ghost" id="up-go">{e("pt_update_btn")}</button></div>
 <p class="dim" id="up-msg"></p></details>
 </div>'''
+
+
+def live_html():
+    from html import escape
+    e = lambda k: escape(t(k))
+    return (f'<section class="panel live" id="live"><div class="lhead"><h2 data-tip="{tip(t("pp_live_tip"))}">{icon("term")}{e("pp_live")}</h2>'
+            f'<span class="dim" id="lv-sum"></span><button class="ghost" id="lv-name" hidden>{e("pp_tm_name")}</button>'
+            f'<button class="ghost" id="lv-conf" hidden></button></div><div class="list" id="lv-list"></div>'
+            f'<pre class="log" id="lv-log" hidden></pre></section>')
 
 
 def tools_js():
@@ -5382,6 +6110,32 @@ def main(argv=None):
     fp.add_argument("--force", action="store_true", help="pin it even while it is cooling")
     fp.add_argument("--config", action="append", help="also use this CLI config folder (repeatable)")
     fp.set_defaults(fn=cmd_fm_pin)
+    fd = sub.add_parser("find", help="search what was said in every CLI login's terminal sessions; each hit shows how to resume it")
+    fd.add_argument("words", nargs="+", help="words that must all be in the session (any case)")
+    fd.add_argument("--account", help="only this account's CLI login")
+    fd.add_argument("--limit", type=int, default=20, help="at most this many sessions (default 20)")
+    fd.add_argument("--config", action="append", help="also search this CLI config folder (repeatable)")
+    fd.set_defaults(fn=cmd_find)
+    rs = sub.add_parser("resume", help="resume a terminal session in a new tmux window (or terminal window), in its folder, "
+                                       "with its login")
+    rs.add_argument("session", help="the session id, or its first characters (from find)")
+    rs.add_argument("--to", help="copy it to this account's CLI login first and resume it there (copy only)")
+    rs.add_argument("--here", action="store_true", help="resume it in this terminal instead")
+    rs.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
+    rs.set_defaults(fn=cmd_resume)
+    ps = sub.add_parser("ps", help="Claude Code sessions running now, every CLI login: busy or idle, and their tmux window")
+    ps.add_argument("--go", metavar="TARGET", help="show that session's tmux window (a tmux target, session id prefix or pid)")
+    ps.add_argument("--json", action="store_true", help="print them as JSON")
+    ps.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
+    ps.set_defaults(fn=cmd_ps)
+    tx = sub.add_parser("tmux", help="tmux and Claude: `name` names windows after their session, `line` is the status bar text, "
+                                     "`menu` a session menu, `conf` the ~/.tmux.conf block that wires them up")
+    tx.add_argument("action", nargs="?", default="name", choices=("name", "line", "menu", "conf"))
+    g = tx.add_mutually_exclusive_group()
+    g.add_argument("--install", action="store_true", help="conf: add the block to ~/.tmux.conf (backed up first) and load it")
+    g.add_argument("--remove", action="store_true", help="conf: take the block out and put tmux's defaults back")
+    tx.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
+    tx.set_defaults(fn=cmd_tmux)
     args = p.parse_args(argv)
     args.fn(args)
 
