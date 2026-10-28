@@ -200,7 +200,7 @@ export const register: Register = on => {
               </Text>
               <Button key={`pin-${r.sid}`} plain dimColor={!r.pin} label={r.pin ? '📌' : '·'}
                 onPress={() => act($, ['ps', r.pin ? '--unpin' : '--pin', r.sid])} />
-              <Text bold>{r.name}</Text>
+              <Box flexShrink={0}><Text bold>{r.name}</Text></Box>
               <Box flexGrow={1} flexShrink={1}>
                 <Text wrap="truncate-end">{r.title || r.sid.slice(0, 8)} <Text dimColor>{r.project}</Text></Text>
               </Box>
@@ -235,7 +235,7 @@ export const register: Register = on => {
         {hits.rows.slice(0, Math.max(1, Math.floor(room / 2))).map(hit => (
           <Box key={`hit-${hit.sid}`} flexDirection="column">
             <Box columnGap={1}>
-              <Text bold>{hit.name}</Text>
+              <Box flexShrink={0}><Text bold>{hit.name}</Text></Box>
               <Box flexGrow={1} flexShrink={1}>
                 <Text wrap="truncate-end">{hit.title} <Text dimColor>{hit.project} · {ago(hit.last)}</Text></Text>
               </Box>

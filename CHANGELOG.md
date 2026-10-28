@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1
 - The cmove mod (`mod/`, installed with `/plugin install cmove --marketplace Layla-NL/claude-move`): quota per account in Claude Code's status line, `/cm` for a pane with the running sessions (pin, name, go there), and `/cm-find` to search and resume. Each button runs one claude-move command.
 - `usage --json` and `find --json`, which the mod reads.
 - Use per account now counts every signed-in CLI folder (`~/.claude-*`), not only `~/.claude`, so the cards include the crews' and other CLI logins' use. A CLI session copied into `~/.claude` for the desktop app keeps its CLI replies under the login they ran in, so they no longer show up as "CLI, account unknown" (the separate CLI card).

@@ -44,7 +44,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 WIN = sys.platform == "win32"
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
