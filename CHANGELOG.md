@@ -1,9 +1,7 @@
 # Changelog
 
-## Unreleased
-- `fm-pin` switches firstmate's accounts by group. The crews (the default) are pinned in firstmate's `config/claude-account` and now also in each second mate's own home, so the second mates' crews follow. `--group resident` (常驻) pins the second mates themselves through `config/secondmate-accounts/<id>/claude-account`; `--relaunch` relaunches the idle ones with firstmate's `bin/fm-control.sh` so they take it now, and busy ones are left with the command to run later. `fm-pin` without an account shows what each group uses. The panel's firstmate tool has a pin button for each group.
-
 ## 0.8.2
+- `fm-pin` switches firstmate's accounts by group. The crews (the default) are pinned in firstmate's `config/claude-account` and now also in each second mate's own home, so the second mates' crews follow. `--group resident` (常驻) pins the second mates themselves through `config/secondmate-accounts/<id>/claude-account`; `--relaunch` relaunches the idle ones with firstmate's `bin/fm-control.sh` so they take it now, and busy ones are left with the command to run later. `fm-pin` without an account shows what each group uses. The panel's firstmate tool has a pin button for each group.
 - The mod's Move page: copy the desktop app's sessions into the account it is signed into now, from any other account and over 3 days, 7 days or all. The first press shows what would change, the second quits the app, copies (backup first) and opens it again; Undo the last move works the same way.
 - `to --app` / `undo --app`: quit the desktop app first and open it again afterwards. Started inside the app (its Code page, the mod), a copy of claude-move running on its own does it, since quitting the app ends what it started, and a notification says how it went. The log is kept in `~/.config/claude-move/last-move.json`.
 - `list --json`: the desktop app's accounts, the one it is signed into, and the last `--app` move.
