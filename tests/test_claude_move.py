@@ -255,6 +255,19 @@ class Usage(unittest.TestCase):
         self.assertIn("CLI, account unknown", r.stdout)
         self.assertIn("switch to: second", r.stdout)
 
+    def test_cli_logins_count_for_their_account(self):
+        # a CLI login's own folder counts for its account, and its session copied into the desktop's folder (import-cli,
+        # then going on in the app) does not become "account unknown"
+        cli = self.home / ".claude-work"
+        (cli / "projects" / "-p").mkdir(parents=True)
+        (cli / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": self.b}}))
+        (cli / "projects" / "-p" / "s9.jsonl").write_text(json.dumps(reply("s9", self.now - 300, "m3", out=100000, entry="cli")) + "\n")
+        r = self.run_tool("usage")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("account unknown", r.stdout)
+        line = next(ln for ln in r.stdout.splitlines() if ln.startswith("bbbbbbbb"))
+        self.assertIn("5h $3", line)  # m2 and m3 once each: 102000 output tokens at opus prices = $2.55
+
     def test_cache_is_incremental(self):
         self.run_tool("usage")
         with open(self.transcript, "a") as fh:
