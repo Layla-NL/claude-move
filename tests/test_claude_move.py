@@ -609,6 +609,77 @@ class Firstmate(unittest.TestCase):
         self.run_tool("quota-snapshot", "unschedule", **env)
         self.assertEqual(list(agents.iterdir()), [])
 
+    def mates(self):
+        """Two Claude second mates (each a firstmate home of its own) and a ship, as firstmate's state records them."""
+        state = self.fm / "state"
+        state.mkdir()
+        self.mate_homes = {}
+        for i in ("memory", "inner"):
+            h = self.home / "tree" / i
+            (h / "bin").mkdir(parents=True)
+            (h / "bin/fm-spawn.sh").write_text("")
+            (state / f"{i}.meta").write_text(f"window=firstmate:fm-{i}\nkind=secondmate\nharness=claude\nhome={h}\n")
+            self.mate_homes[i] = h
+        (state / "ship1.meta").write_text("kind=ship\nharness=claude\nhome=/x\n")
+        (state / "memory.busy-state").write_text("v1 state=idle\n")
+        (state / "inner.busy-state").write_text("v1 state=busy\n")
+        ran = self.home / "relaunched.txt"
+        if WIN:
+            self.skipTest("firstmate runs on macOS and Linux")
+        ctl = self.fm / "bin/fm-control.sh"
+        ctl.write_text(f'#!/bin/sh\necho "$1 $2" >> "{ran}"\necho relaunched\n')
+        ctl.chmod(0o755)
+        return ran
+
+    def test_groups_switch_their_own_pins(self):
+        self.prepare()
+        self.answer(self.first, usage_answer(5, 10, 1, self.now + 7200))
+        ran = self.mates()
+        mate_pin = lambda i: self.fm / "config/secondmate-accounts" / i / "claude-account"
+        # the crews: firstmate's pin and each second mate home's, in one go
+        r = self.run_tool("fm-pin", "second", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Also the crews of 2 second mate(s): inner, memory", r.stdout)
+        for h in [self.fm] + list(self.mate_homes.values()):
+            self.assertEqual((h / "config/claude-account").read_text(encoding="utf-8"), f"{self.second}\n")
+        self.assertFalse(mate_pin("memory").exists())
+        out = self.run_tool("fm-pin", **self.env).stdout
+        self.assertIn("Crews: second · 3 place(s)", out)
+        self.assertIn("Resident (second mates): second · 2 place(s)", out)  # no pin of their own: the crews' applies
+        # the resident group: each second mate's own pin, the ship left alone; it says how to relaunch
+        r = self.run_tool("fm-pin", "first", "--group", "常驻", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(mate_pin("memory").read_text(encoding="utf-8"), f"{self.first}\n")
+        self.assertEqual(mate_pin("inner").read_text(encoding="utf-8"), f"{self.first}\n")
+        self.assertFalse((self.fm / "config/secondmate-accounts/ship1").exists())
+        self.assertEqual(self.pin.read_text(encoding="utf-8"), f"{self.second}\n")
+        self.assertIn("fm-control.sh memory relaunch", r.stdout)
+        self.assertFalse(ran.exists())
+        out = self.run_tool("fm-pin", **self.env).stdout
+        self.assertIn("Resident (second mates): first · 2 place(s)", out)
+        # mixed, then --relaunch: only the changed and idle one is relaunched
+        mate_pin("inner").write_text(f"{self.second}\n")
+        self.assertIn("second (inner) · first (memory)", self.run_tool("fm-pin", **self.env).stdout)
+        r = self.run_tool("fm-pin", "first", "--group", "resident", "--relaunch", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("inner: busy, not relaunched", r.stdout)
+        self.assertFalse(ran.exists())  # memory had not changed, inner is busy
+        mate_pin("memory").write_text(f"{self.second}\n")
+        r = self.run_tool("fm-pin", "first", "--group", "resident", "--relaunch", **self.env)
+        self.assertIn("memory: relaunched", r.stdout)
+        self.assertEqual(ran.read_text(encoding="utf-8"), "memory relaunch\n")
+        self.assertNotEqual(self.run_tool("fm-pin", "first", "--group", "nope", **self.env).returncode, 0)
+        # the panel: the same groups, with a pin button for each
+        Panel.start(self, **self.env)
+        api = lambda name, body=None: json.loads(Panel.call(self, "/api/" + name, body)[1])
+        c = api("crew")
+        self.assertTrue(c["mates"])
+        self.assertEqual({a["name"]: (a["pinned"], a["resident"]) for a in c["accounts"]}, {"first": (False, True), "second": (True, False)})
+        self.assertTrue(any("Resident" in x for x in c["info"]))
+        self.assertTrue(api("crew", {"do": "pin", "acct": self.b, "group": "resident"})["ok"])
+        self.assertEqual(mate_pin("memory").read_text(encoding="utf-8"), f"{self.second}\n")
+        self.assertEqual(Panel.call(self, "/api/crew", {"do": "pin", "acct": self.b, "group": "x"})[0], 400)
+
     def test_panel_crew_tool(self):
         self.prepare()
         Panel.start(self, **self.env)

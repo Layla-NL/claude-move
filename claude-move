@@ -440,7 +440,22 @@ T = {
     "fp_line": ("{m} {a:10} {w}", "{m} {a:10} {w}"),
     "fp_left": ("{p}% left this week", "本周剩 {p}%"),
     "fp_noff": ("no official % yet", "还没有官方数据"),
-    "fp_hint": ("Pin one: claude-move fm-pin <account>", "换号：claude-move fm-pin <账号>"),
+    "fp_hint": ("Pin one: claude-move fm-pin <account>; a whole group: claude-move fm-pin <account> --group crews|resident",
+                "换号：claude-move fm-pin <账号>；整组换：claude-move fm-pin <账号> --group 船员|常驻"),
+    "fg_crews": ("Crews", "船员"),
+    "fg_resident": ("Resident (second mates)", "常驻（二副）"),
+    "fg_line": ("{g}: {a} · {n} place(s)", "{g}：{a} · {n} 处"),
+    "fg_bad": ("unreadable pin", "钉的文件读不了"),
+    "fg_none": ("not pinned", "没钉"),
+    "fg_unknown": ("No group {g}: use crews or resident.", "没有“{g}”这个组：用 船员（crews）或 常驻（resident）。"),
+    "fg_same": ("{g} already use {a}.", "{g}本来就在用 {a}。"),
+    "fg_done": ("{g} pinned to {a}: {n} ({l}).", "{g}已钉到 {a}：{n} 个（{l}）。"),
+    "fg_homes": ("Also the crews of {n} second mate(s): {l}.", "二副自己的船员也换了：{n} 个（{l}）。"),
+    "fg_note": ("Running second mates stay on their account until relaunched (--relaunch does the idle ones):",
+                "在跑的二副重启以后才换号（加 --relaunch 会重启空闲的那些）："),
+    "fg_busy": ("  {i}: busy, not relaunched; later: bin/fm-control.sh {i} relaunch", "  {i}：正在忙，没重启；之后再：bin/fm-control.sh {i} relaunch"),
+    "fg_relaunched": ("  {i}: relaunched", "  {i}：已重启"),
+    "fg_relaunch_fail": ("  {i}: relaunch failed: {e}", "  {i}：重启失败：{e}"),
     "n_crew_switch": ("{b} has {p}% left this week: claude-move fm-pin {b}", "{b} 本周还剩 {p}%，要换就敲 claude-move fm-pin {b}"),
     "pt_crew": ("firstmate crews", "firstmate 船员"),
     "pp_d_crew": ("Crew", "船员"),
@@ -459,6 +474,10 @@ T = {
     "pt_crew_sched_on": ("Refresh every 10 min", "开定时刷新（10 分钟）"),
     "pt_crew_sched_off": ("Stop the scheduled refresh", "关定时刷新"),
     "pp_crew": ("firstmate's crews use this account", "firstmate 的船员在用这个号"),
+    "pt_mate_pin": ("Pin for second mates", "钉给常驻"),
+    "pt_mate_pinned": ("second mates use this", "常驻在用"),
+    "pt_mate_pin_confirm": ("Pin firstmate's second mates to {a}? Each takes it when relaunched (claude-move fm-pin {a} --group resident --relaunch does the idle ones).",
+                            "把 firstmate 的常驻二副钉到 {a}？每个二副重启后才换（claude-move fm-pin {a} --group 常驻 --relaunch 会重启空闲的那些）。"),
     "f_none": ("No terminal session has \"{q}\".", "没有终端会话里有“{q}”。"),
     "f_head": ("{n} terminal sessions with \"{q}\", newest first:", "{n} 个终端会话里有“{q}”，新的在前："),
     "f_indexing": ("Reading every CLI login's transcripts once; later searches only read what is new...",
@@ -4223,7 +4242,11 @@ def fm_pin_file(home=None):
 
 def fm_pin(home=None):
     """firstmate's Claude worker pin as (CLI config folder, None); (None, None) when there is none; (None, error)."""
-    f = fm_pin_file(home)
+    return read_pin(fm_pin_file(home))
+
+
+def read_pin(f):
+    """One firstmate pin file (claude-account), read by firstmate's own rule."""
     try:
         body = f.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -4488,6 +4511,7 @@ def crew_accounts(extra=()):
     """Every CLI login with its saved official numbers, for choosing which one firstmate's crews use."""
     lim = load(LIMITS) or {}
     pinned = crew_acct()
+    mates = {cli_account(c) if c else None for c, _ in (read_pin(f) for _, f in fm_group_files("resident"))}
     now = time.time()
     out, seen = [], set()
     for c in cli_configs(extra):
@@ -4501,13 +4525,73 @@ def crew_accounts(extra=()):
         wk = next((r["percent"] for r in rows if r.get("kind") == "weekly_all" and r.get("percent") is not None), None)
         text = (rows_text(rows) + " · " + t("u_off_head", a=ago(now - rec["at"]))) if rows else t("fp_noff")
         out.append({"acct": a, "name": names().get(a, a[:8]), "dir": short(c), "text": text, "cool": cool,
-                    "left": None if wk is None else round(100 - wk), "pinned": a == pinned})
+                    "left": None if wk is None else round(100 - wk), "pinned": a == pinned,
+                    "resident": mates == {a}})
     return out
 
 
-def fm_pin_set(cfg, force=False, home=None):
-    """Pin firstmate's Claude crews to one CLI login (config/claude-account), then point the snapshot at it."""
+GROUPS = ("crews", "resident")
+
+
+def fm_group(name):
+    """A group by its name in either language: the crews (船员) or the resident second mates (常驻, 二副)."""
+    k = name.strip().lower()
+    return "crews" if k in ("crews", "crew", "船员") else "resident" if k in ("resident", "mates", "常驻", "二副") else None
+
+
+def fm_mates(home=None):
+    """firstmate's local Claude second mates as [(id, record)], from its state/<id>.meta (key=value lines)."""
+    out = []
+    for f in sorted(((home or FM_HOME) / "state").glob("*.meta")):
+        try:
+            d = dict(ln.split("=", 1) for ln in f.read_text(encoding="utf-8").splitlines() if "=" in ln)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if d.get("kind") == "secondmate" and d.get("harness") == "claude" and os.path.isabs(d.get("home", "")):
+            out.append((f.stem, d))
+    return out
+
+
+def fm_group_files(group, home=None):
+    """Where a group's account is written, as [(second mate id or "", pin file)]. The crews: firstmate's
+    config/claude-account and the one in each second mate's own home (its own crews read that). The resident
+    group: each second mate's own pin, config/secondmate-accounts/<id>/claude-account in firstmate's home."""
     home = home or FM_HOME
+    if group == "resident":
+        return [(i, home / "config" / "secondmate-accounts" / i / "claude-account") for i, _ in fm_mates(home)]
+    return [("", fm_pin_file(home))] + [(i, fm_pin_file(Path(d["home"]))) for i, d in fm_mates(home)
+                                        if is_firstmate(Path(d["home"]))]
+
+
+def fm_group_lines(home=None):
+    """One line per group: the account it uses, and which places say something else."""
+    home = home or FM_HOME
+    base, _ = fm_pin(home)
+    out = []
+    for g in GROUPS:
+        files = fm_group_files(g, home)
+        if not files:
+            continue
+        by = {}
+        for i, f in files:
+            cfg, err = read_pin(f)
+            if err:
+                key = t("fg_bad")
+            elif cfg is None and g == "resident" and base:  # no pin of its own: firstmate's crews pin applies
+                key = names().get(cli_account(base) or "", short(base))
+            elif cfg is None:
+                key = t("fg_none")
+            else:
+                a = cli_account(cfg)
+                key = names().get(a, a[:8]) if a else short(cfg)
+            by.setdefault(key, []).append(i or "firstmate")
+        parts = [f"{k} ({', '.join(v)})" if len(by) > 1 else k for k, v in sorted(by.items(), key=lambda kv: -len(kv[1]))]
+        out.append(t("fg_line", g=t("fg_" + g), a=" · ".join(parts), n=len(files)))
+    return out
+
+
+def pin_check(cfg, force):
+    """Ask the login's own /usage before pinning anything to it: it must answer, and not be cooling."""
     acct = cli_account(cfg)
     who = names().get(acct, acct[:8])
     try:
@@ -4520,6 +4604,57 @@ def fm_pin_set(cfg, force=False, home=None):
     cool = [r.get("resets_at") or 0 for r in rows if (r.get("percent") or 0) >= 100 and (r.get("resets_at") or 0) > now]
     if cool and not force:
         sys.exit(t("fp_cool", a=who, w=clock(max(cool))))
+    return who
+
+
+def fm_group_set(group, cfg, force=False, home=None, relaunch=False):
+    """Pin every place of one group to a CLI login, after checking it. Running crews stay where they are; second
+    mates take theirs when relaunched, which --relaunch does for the idle ones through firstmate's own control."""
+    home = home or FM_HOME
+    if group == "crews":
+        return fm_pin_set(cfg, force, home, every=True)
+    who = pin_check(cfg, force)
+    value = "ordinary" if cfg == HOME / ".claude" else str(cfg)
+    changed = []
+    for i, f in fm_group_files(group, home):
+        cur, _ = read_pin(f)
+        if cur is not None and str(cur) == str(cfg):
+            continue
+        write_private(f, value + "\n")
+        snap_log(f"pin {i} {cur if cur is not None else '-'} -> {value}")
+        changed.append(i)
+    if not changed:
+        print(t("fg_same", g=t("fg_resident"), a=who))
+        return
+    print(t("fg_done", g=t("fg_resident"), a=who, n=len(changed), l=", ".join(changed)))
+    if not relaunch:
+        print(t("fg_note"))
+        for i in changed:
+            print(f"  {home / 'bin' / 'fm-control.sh'} {i} relaunch")
+        return
+    for i in changed:
+        st = home / "state" / f"{i}.busy-state"
+        try:
+            busy = "state=busy" in st.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            busy = False
+        if busy:
+            print(t("fg_busy", i=i))
+            continue
+        try:
+            r = subprocess.run([str(home / "bin" / "fm-control.sh"), i, "relaunch"], cwd=str(home), capture_output=True,
+                               text=True, encoding="utf-8", errors="replace", timeout=600)
+            ok, tail = r.returncode == 0, (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+        except (OSError, subprocess.SubprocessError) as e:
+            ok, tail = False, [str(e)]
+        print(t("fg_relaunched" if ok else "fg_relaunch_fail", i=i, e=tail[0]))
+
+
+def fm_pin_set(cfg, force=False, home=None, every=False):
+    """Pin firstmate's Claude crews to one CLI login (config/claude-account), then point the snapshot at it.
+    every: also the crews pin in each second mate's own home."""
+    home = home or FM_HOME
+    who = pin_check(cfg, force)
     value = "ordinary" if cfg == HOME / ".claude" else str(cfg)
     cur, _ = fm_pin(home)
     f = fm_pin_file(home)
@@ -4529,6 +4664,16 @@ def fm_pin_set(cfg, force=False, home=None):
         write_private(f, value + "\n")
         snap_log(f"pin {cur if cur is not None else '-'} -> {value}")
         print(t("fp_done", a=who, f=short(f), v=value))
+    homes = []
+    for i, mf in fm_group_files("crews", home)[1:] if every else ():
+        old, _ = read_pin(mf)
+        if old is None or str(old) != str(cfg):
+            write_private(mf, value + "\n")
+            snap_log(f"pin {i} crews {old if old is not None else '-'} -> {value}")
+            homes.append(i)
+    if homes:
+        print(t("fg_homes", n=len(homes), l=", ".join(homes)))
+    if homes or cur is None or str(cur) != str(cfg):
         print(t("fp_note"))
     print(write_snapshot(cfg, snapshot_out())[1])
 
@@ -4537,8 +4682,12 @@ def cmd_fm_pin(args):
     home = Path(os.path.expanduser(args.home)) if args.home else FM_HOME
     if not is_firstmate(home):
         sys.exit(t("fp_nofm", d=short(home)))
+    group = fm_group(args.group or "crews")
+    if not group:
+        sys.exit(t("fg_unknown", g=args.group))
     if not args.account:
         print("\n".join(crew_lines(home)))
+        print("\n".join(fm_group_lines(home)))
         print()
         for a in crew_accounts(args.config or ()):
             print(t("fp_line", m="*" if a["pinned"] else " ", a=a["name"], w=a["text"]))
@@ -4547,7 +4696,7 @@ def cmd_fm_pin(args):
     cfg = cli_dir(args.account, args.config or ())
     if not cfg:
         sys.exit(t("fp_noacct", a=args.account, l=", ".join(a["name"] for a in crew_accounts(args.config or ())) or "-"))
-    fm_pin_set(cfg, args.force, home)
+    fm_group_set(group, cfg, args.force, home, args.relaunch)
 
 
 def cmd_quota_snapshot(args):
@@ -5665,7 +5814,8 @@ def panel_api(method, path, q, body, extra=()):
         if name == "notify":
             return 200, notify_conf()
         if name == "crew":
-            return 200, {"found": is_firstmate(FM_HOME), "info": crew_lines(), "accounts": crew_accounts(extra),
+            return 200, {"found": is_firstmate(FM_HOME), "info": crew_lines() + fm_group_lines(), "accounts": crew_accounts(extra),
+                         "mates": bool(fm_mates()),
                          "sched": bool((load(SNAP_CONF) or {}).get("sched"))}
         if name == "update":
             try:
@@ -5790,7 +5940,10 @@ def panel_api(method, path, q, body, extra=()):
         if do == "pin":
             if not cfg or not is_firstmate(FM_HOME):
                 return bad
-            ok, log = captured(lambda: fm_pin_set(cfg))
+            group = fm_group(str(body.get("group") or "crews"))
+            if not group:
+                return bad
+            ok, log = captured(lambda: fm_group_set(group, cfg))
             return 200, {"ok": ok, "log": log}
         if do == "snapshot":
             pin, err = fm_pin()
@@ -6042,18 +6195,22 @@ async function loadCrew() {
   r.info.forEach(x => info.append(el("div", {className: "item"}, x)));
   r.accounts.forEach(a => {
     const row = el("div", {className: "item" + (a.cool ? " dim" : "")}, a.name + " · " + a.text);
-    if (a.pinned) row.append(el("b", {textContent: "· " + TT.pt_crew_pinned}));
-    else if (r.found) {
-      const b = el("button", {className: "ghost", textContent: TT.pt_crew_pin});
-      b.onclick = async () => {
-        if (!confirm(fmt(TT.pt_crew_pin_confirm, {a: a.name}))) return;
-        say("crew-log", TT.p_working);
-        const x = await post("crew", {do: "pin", acct: a.acct});
-        say("crew-log", x.log);
-        if (x.ok) reload();
-      };
-      row.append(b);
-    }
+    const groups = [["crews", a.pinned, TT.pt_crew_pin, TT.pt_crew_pinned, TT.pt_crew_pin_confirm]];
+    if (r.mates) groups.push(["resident", a.resident, TT.pt_mate_pin, TT.pt_mate_pinned, TT.pt_mate_pin_confirm]);
+    groups.forEach(([g, on, label, mark, ask]) => {
+      if (on) row.append(el("b", {textContent: "· " + mark}));
+      else if (r.found) {
+        const b = el("button", {className: "ghost", textContent: label});
+        b.onclick = async () => {
+          if (!confirm(fmt(ask, {a: a.name}))) return;
+          say("crew-log", TT.p_working);
+          const x = await post("crew", {do: "pin", acct: a.acct, group: g});
+          say("crew-log", x.log);
+          if (x.ok) reload();
+        };
+        row.append(b);
+      }
+    });
     box.append(row);
   });
   $("crew-sched").textContent = r.sched ? TT.pt_crew_sched_off : TT.pt_crew_sched_on;
@@ -6118,7 +6275,8 @@ TOOLS_KEYS = ("p_working", "no_backups", "pt_move_confirm", "pt_undo_btn", "pt_u
               "pt_in_desk", "pt_runs_none", "pt_run_line", "pt_run_switch", "pt_running", "pt_ended", "pt_fix",
               "pt_rename_ask", "pt_rec_confirm", "pt_login_ask", "pt_crew_pin", "pt_crew_pinned", "pt_crew_pin_confirm",
               "pt_crew_sched_on", "pt_crew_sched_off", "ps_none", "ps_busy", "ps_idle", "pp_live_sum", "pp_go",
-              "pp_pin", "pp_unpin", "pp_tm_conf_on", "pp_tm_conf_off", "pp_tm_conf_confirm")
+              "pp_pin", "pp_unpin", "pp_tm_conf_on", "pp_tm_conf_off", "pp_tm_conf_confirm",
+              "pt_mate_pin", "pt_mate_pinned", "pt_mate_pin_confirm")
 
 
 def tools_html():
@@ -6282,6 +6440,10 @@ def main(argv=None):
     fp.add_argument("account", nargs="?", help="label or id prefix of an account with a CLI login; none: show the accounts")
     fp.add_argument("--home", help="firstmate's folder (default ~/Developer/firstmate)")
     fp.add_argument("--force", action="store_true", help="pin it even while it is cooling")
+    fp.add_argument("--group", help="switch a whole group: crews (firstmate's and every second mate's own crews) or "
+                                    "resident (the second mates themselves)")
+    fp.add_argument("--relaunch", action="store_true", help="with --group resident: relaunch the idle second mates "
+                                                            "through firstmate's fm-control.sh so they take it now")
     fp.add_argument("--config", action="append", help="also use this CLI config folder (repeatable)")
     fp.set_defaults(fn=cmd_fm_pin)
     fd = sub.add_parser("find", help="search what was said in every CLI login's terminal sessions; each hit shows how to resume it")
