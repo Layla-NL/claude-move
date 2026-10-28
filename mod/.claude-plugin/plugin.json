@@ -1,0 +1,9 @@
+{
+  "name": "cmove",
+  "version": "0.1.0",
+  "description": "claude-move inside Claude Code: quota per account in the status line, and a pane with the running terminal sessions (pin, name, go there) and search with resume",
+  "author": { "name": "Layla", "url": "https://github.com/Layla-NL" },
+  "homepage": "https://github.com/Layla-NL/claude-move",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

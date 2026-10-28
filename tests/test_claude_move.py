@@ -254,6 +254,10 @@ class Usage(unittest.TestCase):
         self.assertIn("$0 at API prices", lines["first"])
         self.assertIn("CLI, account unknown", r.stdout)
         self.assertIn("switch to: second", r.stdout)
+        out = json.loads(self.run_tool("usage", "--json").stdout)  # what the mod reads
+        self.assertEqual(out["pick"], "second")
+        self.assertEqual({r["name"] for r in out["rows"]}, {"first", "second"})
+        self.assertEqual(next(r for r in out["rows"] if r["name"] == "first")["cool"]["kind"], "five_hour")
 
     def test_cli_logins_count_for_their_account(self):
         # a CLI login's own folder counts for its account, and its session copied into the desktop's folder (import-cli,
@@ -640,6 +644,8 @@ class Terminal(unittest.TestCase):
         self.assertIn("first", r.stdout)
         self.assertIn("claude-move resume 1111aaaa", r.stdout)
         self.assertIn("1 terminal sessions", r.stdout)
+        hits = json.loads(self.run_tool("find", "--json", "登录", CLAUDE_MOVE_TMUX="0").stdout)  # what the mod reads
+        self.assertEqual([(h["sid"], h["title"], h["live"]) for h in hits], [(self.S1, "Login fixes", "")])
         self.assertIn("password", self.run_tool("find", "LOGIN", "form", CLAUDE_MOVE_TMUX="0").stdout)  # any case, all words
         for word in ("toolword", "metaword", "wrapword"):  # tool output and the CLI's own notes are not what was said
             self.assertIn("No terminal session", self.run_tool("find", word, CLAUDE_MOVE_TMUX="0").stdout)

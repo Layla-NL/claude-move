@@ -81,7 +81,7 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 | `claude-move name <account> <label>` | Give an account a short label, e.g. `work`, `personal` |
 | `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them |
 | `claude-move undo [--list] [--backup NAME] [--dry-run]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too |
-| `claude-move usage [--refresh] [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % from the CLI. `--refresh` asks `/usage` of each signed-in CLI folder first; `--html` opens a panel page |
+| `claude-move usage [--refresh] [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % from the CLI. `--refresh` asks `/usage` of each signed-in CLI folder first; `--html` opens a panel page; `--json` prints the numbers for the mod |
 | `claude-move panel [--demo]` | The same panel in your browser, served on 127.0.0.1 only, with a button that moves your sessions after you switch accounts (see below). `--demo` shows sample accounts instead, reads nothing on this computer and its buttons do nothing: for screenshots, or a look before you set anything up |
 | `claude-move app install [--icon IMAGE] [--no-dock]` | Make `~/Applications/Claude Move.app` and put it in the Dock: double-click it to open the panel, no Terminal needed |
 | `claude-move bar install` | macOS: a ball in the menu bar through [SwiftBar](https://swiftbar.app) or xbar, colored like the panel, for the account the desktop app is signed into; its menu lists every account and opens the panel. It reads only the official numbers already saved, so it costs nothing to run every minute. `bar uninstall` removes it |
@@ -92,7 +92,7 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 | `claude-move watch install` / `uninstall` | Record the official 5-hour/weekly % each time the CLI status line refreshes; keeps your existing status line |
 | `claude-move fm-pin [<account>]` | For [firstmate](https://github.com/kunchenguid/firstmate): show which CLI login its Claude crews use, or pin them to one. It checks that login answers `/usage` and is not cooling (`--force` pins it anyway), writes firstmate's `config/claude-account`, and points the quota snapshot at it. Crews started after that use it; running ones stay where they are |
 | `claude-move quota-snapshot [--refresh] [--account A] [--out FILE]` | Write one account's official % in quota-axi's cache format, so firstmate's quota-axi reads it through `QUOTA_AXI_SNAPSHOT` without touching the login or the Keychain (see below). `schedule [--every 10]` / `unschedule`: refresh it every few minutes (launchd on macOS, Task Scheduler on Windows); `status` shows the pin, the file and the schedule |
-| `claude-move find <words> [--account A]` | Search what was said in the terminal sessions of every CLI login: your prompts, Claude's replies and session titles (not tool output). Each hit shows the account, project, a snippet, whether it is running, and `claude-move resume <id>`. The first search reads every transcript once into `~/.cache/claude-move/search.db` (readable only by you); later ones read only what is new |
+| `claude-move find <words> [--account A] [--json]` | Search what was said in the terminal sessions of every CLI login: your prompts, Claude's replies and session titles (not tool output). Each hit shows the account, project, a snippet, whether it is running, and `claude-move resume <id>`. The first search reads every transcript once into `~/.cache/claude-move/search.db` (readable only by you); later ones read only what is new |
 | `claude-move resume <id> [--to <account>] [--here]` | Resume a terminal session in its own folder with its own login: in a new tmux window when tmux is running, else a new terminal window; `--here` in this one. `--to` copies it into another account's CLI login first (copy only, as `run` does) and resumes it there. A session that is already running is not started twice |
 | `claude-move ps [--go <target>] [--label <target> <name>] [--pin\|--unpin <target>...] [--json]` | Claude Code sessions running now, from every CLI login: account, busy or idle, tmux window, name, folder. `--go` shows one (by tmux target, session id prefix or pid) in the terminal attached to tmux, or opens a terminal attached to it. `--label` gives one a name of your own (`""` takes it off), kept in `~/.config/claude-move/labels.json` and shown first in `ps`, the tmux menu, the panel and `find`; windows claude-move names follow it, and windows other tools named (firstmate's `fm-*`) keep their names. `--pin` keeps sessions at the top of `ps`, the tmux menu and the panel (📌), `--unpin` takes them off, also by id once a session has ended |
 | `claude-move tmux [name\|line\|menu\|conf]` | `name` names each tmux window that holds one Claude session `account·session` (● while busy); windows someone else named, such as firstmate's, stay as they are. `line` prints running sessions per account for the status bar, `menu` pops up a menu of them. `conf --install` adds a block to `~/.tmux.conf` (backed up first) that wires these up: mouse on, `line` in the status bar every 15 s, prefix + S for the menu; `conf --remove` takes it out and puts tmux's defaults back |
@@ -186,6 +186,17 @@ Under the cards, **Terminal sessions** lists the Claude Code sessions running on
 finds terminal sessions by what was said (`find`) under the desktop ones, with Resume (`resume`), Go there for one
 that is running, and the command to resume it by hand. The list comes from the `sessions/<pid>.json` files Claude Code
 keeps for its running processes; those are not documented and may change.
+
+### Inside Claude Code: the cmove mod
+
+The same terminal-session list, quota and search can sit beside the chat in Claude Code, as a mod in [`mod/`](mod/):
+quota per account in the status line, `/cm` for the running sessions (📌 pin, ✎ name, → go there) and
+`/cm-find <words>` to search and resume. Its buttons run claude-move, which has to be installed. Moving sessions
+between desktop-app accounts stays here, since it quits and reopens the app the mod runs in.
+
+```
+/plugin install cmove --marketplace Layla-NL/claude-move
+```
 
 ### Everything else from the panel
 
@@ -315,7 +326,7 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 - `undo [--list] [--backup 名字] [--dry-run]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。
 - `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
-- `usage [--refresh] [--html] [--config 目录]`：各账号额度面板；`--refresh` 先向每个命令行登录问官方 `/usage`，`--html` 打开网页版。
+- `usage [--refresh] [--html] [--json] [--config 目录]`：各账号额度面板；`--refresh` 先向每个命令行登录问官方 `/usage`，`--html` 打开网页版，`--json` 输出给 mod 用的数字。
 - `panel [--demo]`：在浏览器里打开带按钮的面板（只在本机 127.0.0.1 上）。`--demo` 换成示例账号，不读这台电脑上的任何东西，按钮也不做事，用来截图或者先看看长什么样。换号时：先在桌面 App 里退出登录、登上新号、打开一次 Code 页，再回面板点黑色的“A → B”按钮。面板会先从 App 日志确认 App 现在登录的确实是 B，然后退出 App、照 `claude-move to B` 搬会话（先备份）、重新打开 App。登录这一步始终由你在 App 里自己点。请在“终端”里运行 `claude-move panel`，不要在桌面 App 的 Claude Code 会话里运行，因为退出 App 会连那个会话一起关掉。有命令行登录的号，卡片上有“打开终端”：弹出一个新终端窗口，在这个号最近用过的项目文件夹里，用它自己的配置目录运行 `claude`（和 `claude-move term <账号>` 一样，不读登录信息）；“打开终端（手机可连）”再加上 `--remote-control <名字>`，手机 Claude App 登录同一个号就能连上。两条命令也都能一键复制。`~/.claude` 和某个 `~/.claude-*` 显示的是同一个号时，用 `~/.claude-*` 那个。
 - `app install [--icon 图片] [--no-dock]`：生成 `~/Applications/Claude Move.app` 并放进程序坞，双击就打开面板，不用开终端。它独立运行，从面板退出桌面 App 不会把它关掉；再双击会回到已经开着的面板；页面关掉 30 分钟后自己停。`--icon` 可以换成任意图片当图标。
 - `bar install`：macOS 菜单栏上的一颗小球（通过 [SwiftBar](https://swiftbar.app) 或 xbar），颜色和面板一样，显示桌面 App 登录的那个号；点开列出所有号，还能打开面板。只读已经存下的官方数字，每分钟跑一次也不费事。`bar uninstall` 去掉。
@@ -324,7 +335,7 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 - `notify on|off|status|test [--levels 75,90,95]`：某个号的官方百分比过 75/90/95% 时弹系统通知，每个重置周期每档只提醒一次（默认开）。每周第一次打开面板或运行 `usage` 时，还会发一条上周小结：按 API 价总共用了多少、哪个号用得最多、哪天最忙。
 - `doctor [--refresh]`：自检：名字、各命令行登录（以及 `/usage` 能不能用）、同一个号出现在两个目录、有桌面会话却没有命令行登录的号、状态栏记录器、小 App 的签名。
 - `watch install` / `watch uninstall`：装上（或卸掉）状态栏记录器，用命令行版时记下官方百分比。
-- `find <词> [--account 账号]`：搜所有命令行登录的终端会话里聊过的内容：你说的话、Claude 的回答、会话标题（不搜工具输出）。每条结果显示账号、项目、片段、是不是正在跑，以及 `claude-move resume <id>`。第一次搜会把所有会话记录读一遍，存进 `~/.cache/claude-move/search.db`（只有你能读），之后只读新增的。
+- `find <词> [--account 账号] [--json]`：搜所有命令行登录的终端会话里聊过的内容：你说的话、Claude 的回答、会话标题（不搜工具输出）。每条结果显示账号、项目、片段、是不是正在跑，以及 `claude-move resume <id>`。第一次搜会把所有会话记录读一遍，存进 `~/.cache/claude-move/search.db`（只有你能读），之后只读新增的。
 - `resume <id> [--to 账号] [--here]`：在会话自己的文件夹、用它自己的登录接着跑：tmux 开着就开一个新的 tmux 窗口，不然开新终端窗口；`--here` 就在当前终端。`--to` 先把会话复制到另一个号的命令行登录（只复制，和 `run` 一样）再在那边接上。已经在跑的会话不会再开第二个。
 - `ps [--go 目标] [--label 目标 名字] [--pin|--unpin 目标…] [--json]`：现在在跑的 Claude Code 会话，所有命令行登录都算：账号、忙还是空闲、在哪个 tmux 窗口、名字、文件夹。`--go` 切过去（按 tmux 目标、会话 id 开头或进程号），在连着 tmux 的终端里显示，没有就开一个终端连上。`--label` 给会话起你自己的名字（写 `""` 去掉），存在 `~/.config/claude-move/labels.json`，`ps`、tmux 菜单、面板和 `find` 都先用它；claude-move 起名的窗口跟着改，别的工具起名的窗口（firstmate 的 `fm-*`）名字不动。`--pin` 把会话置顶（📌），`ps`、tmux 菜单和面板里都排最前，可以一次写好几个；`--unpin` 取消，会话结束了也能按 id 取消。
 - `tmux [name|line|menu|conf]`：`name` 把只装着一个 Claude 会话的 tmux 窗口改名成“账号·会话名”（忙的时候前面有 ●）；别人起过名的窗口（比如 firstmate 的）不动。`line` 输出给状态栏用的各账号会话数，`menu` 弹出会话菜单。`conf --install` 往 `~/.tmux.conf` 加一段（先备份）把这些接上：开鼠标、状态栏每 15 秒显示一次 `line`、前缀键 + S 弹菜单；`conf --remove` 去掉这段并恢复 tmux 默认。
@@ -354,6 +365,7 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 - **接下来 7 天：** 每个号一条线，每项官方额度在它重置的时间点上有个圆点（颜色看那项用了多少），冷却中的号有条红条一直到恢复。刻度在“现在”附近拉开，接下来几个小时看得清楚。
 - **搜会话**（右上角）：按标题搜所有号在桌面 App 里的会话。搜到别的号的会话，旁边有个按钮能把它拷到桌面 App 现在登录的号（会关掉再重开 App）。下面接着是终端会话，按聊过的内容搜（`find`），每条有“接着做”（`resume`），正在跑的有“过去”，还能复制手动接上的命令。
 - **终端会话**（卡片下面）：这台 Mac 上正在跑的 Claude Code 会话，所有命令行登录都算（`ps`），置顶的在最前，然后是忙的，每 10 秒刷新；图钉按钮把它置顶或取消，“过去”打开它所在的 tmux 窗口。旁边的按钮给 tmux 窗口起名（`tmux name`），以及装上 / 撤掉 `~/.tmux.conf` 那段（`tmux conf`，装之前先给你看内容）。列表来自 Claude Code 给运行中进程记的 `sessions/<pid>.json`，这个格式没有文档，以后可能会变。
+- **放进 Claude Code 里（cmove mod）**：同样的终端会话列表、额度和搜索，也可以作为 mod 放在 Claude Code 的对话旁边，代码在 [`mod/`](mod/)。状态栏显示各号额度，`/cm` 打开在跑的会话（📌 置顶、✎ 起名、→ 过去），`/cm-find 关键词` 搜索并接着做。按钮背后跑的是 claude-move，所以本体要先装上。桌面 App 换号搬会话还是留在本体里：搬会话要关掉再重开 App，而 mod 就运行在 App 里面。安装：在终端会话里输入 `/plugin install cmove --marketplace Layla-NL/claude-move`。
 - **快捷键：** 1–9 打开对应卡片的终端，/ 搜索，R 刷新官方百分比，Esc 关闭。
 - 浏览器标签页显示桌面 App 登录的那个号：图标是它的球，标题是它的数字。
 - 底部 Dock 里的“点缀”调节球里第二种颜色的多少；右上角能切换浅色 / 深色 / 跟随系统，以及中文 / English。这几项都存在 `~/.config/claude-move/look.json`，下次打开还是你选的。
