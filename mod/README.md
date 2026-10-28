@@ -5,10 +5,9 @@ A Claude Code mod that puts [claude-move](https://github.com/Layla-NL/claude-mov
 - **Status line:** each account's official weekly percentage (or when it stops cooling), and which account to use next. Refreshed every five minutes.
 - **`/cm`:** a pane with the Claude Code sessions running now, from every CLI login. Busy ones are marked ●. 📌 pins a session to the top, ✎ names it, and → brings up its tmux window.
 - **`/cm-find <words>`:** searches what was said in every terminal session. ↩ resumes a hit in a new tmux window or terminal window, and → goes to it if it is running.
+- **Move** (a page of `/cm`): after you sign the desktop app into another account, copy your sessions into it from the account you used before. The first press shows what would change; the second quits the app, copies (backing up the list first) and opens the app again. A claude-move running on its own does that, so quitting the app does not stop it, and a notification says how it went. Undo the last move the same way.
 
-It needs claude-move 0.8.1 or newer, on `PATH` or in `~/.local/bin`. Each button runs one claude-move command, so claude-move's rules hold: it copies and never deletes, backs up before it writes, and never reads login credentials.
-
-Moving sessions between desktop-app accounts stays in claude-move (`claude-move panel` or `claude-move to`). That step quits and reopens the desktop app, and a mod runs inside it.
+It needs claude-move 0.8.2 or newer, on `PATH` or in `~/.local/bin`. Each button runs one claude-move command, so claude-move's rules hold: it copies and never deletes, backs up before it writes, and never reads login credentials.
 
 ## Install
 
@@ -35,10 +34,9 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
 - **状态栏**：每个号的官方本周百分比（冷却中的号显示几点恢复），以及建议下一个用哪个号。每 5 分钟刷新一次。
 - **`/cm`**：打开一个面板，列出现在在跑的 Claude Code 会话，所有命令行登录都算。忙的会话标 ●。📌 置顶，✎ 起名，→ 切到它所在的 tmux 窗口。
 - **`/cm-find 关键词`**：按聊过的内容搜所有终端会话。↩ 在新的 tmux 窗口或终端里接着做；会话还在跑的话，→ 直接切过去。
+- **搬会话**（`/cm` 里的一页）：桌面 App 登上另一个号以后，把之前那个号的会话拷过来。第一次按只预览要搬什么；第二次按才会关掉 App、搬（先备份列表）、再打开 App。这一步交给独立运行的 claude-move 去做，所以 App 关掉也不会打断，做完会弹通知。上次搬家也能同样两下撤回。
 
-需要 claude-move 0.8.1 或更新的版本，放在 `PATH` 里或 `~/.local/bin`。每个按钮都只运行一条 claude-move 命令，所以 claude-move 的规矩照样成立：只拷贝、不删除，写之前先备份，不读登录凭据。
-
-桌面 App 换号搬会话仍然用 claude-move 本体（`claude-move panel` 或 `claude-move to`）。搬会话要关掉再重开桌面 App，而 mod 就运行在 App 里面。
+需要 claude-move 0.8.2 或更新的版本，放在 `PATH` 里或 `~/.local/bin`。每个按钮都只运行一条 claude-move 命令，所以 claude-move 的规矩照样成立：只拷贝、不删除，写之前先备份，不读登录凭据。
 
 ## 安装
 

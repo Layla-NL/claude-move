@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Found, Hit, LiveRow, Quota, QuotaRow, Tab } from '../types'
+import type { Desk, Found, Hit, LiveRow, Mv, Quota, QuotaRow, Span, Tab } from '../types'
 
 // The mod draws; claude-move does the work. Every action is one claude-move command, so the
 // rules claude-move keeps (copy only, back up first, never read credentials) hold here too.
@@ -13,6 +13,8 @@ const found = atom({ plugin: 'cmove', key: 'found' } as const, { q: '', rows: []
 const tab = atom({ plugin: 'cmove', key: 'tab' } as const, 'live' as Tab)
 const note = atom({ plugin: 'cmove', key: 'note' } as const, '')
 const editing = atom({ plugin: 'cmove', key: 'editing' } as const, '')
+const desk = atom({ plugin: 'cmove', key: 'desk' } as const, null, { shape: 'desk-1' })
+const mv = atom({ plugin: 'cmove', key: 'mv' } as const, { src: '', span: '3', armed: '', log: '' } as Mv, { shape: 'mv-1' })
 
 const T = {
   pane: ['claude-move', 'claude-move'],
@@ -36,6 +38,27 @@ const T = {
   cmdOpen: ['Running sessions, quota and search (claude-move)', '在跑的会话、额度和搜索（claude-move）'],
   cmdFind: ['Search what was said in terminal sessions (claude-move find)', '按聊过的内容搜终端会话（claude-move find）'],
   opened: ['claude-move pane opened.', '已打开 claude-move 面板。'],
+  move: ['Move', '搬会话'],
+  signedIn: ['The desktop app is signed into', '桌面 App 现在登录的是'],
+  noSigned: ["Can't tell which account the desktop app is signed into: open the app once.",
+             '看不出桌面 App 登录的是哪个号：先打开一次 App。'],
+  noFolder: ['Its Code page has no list yet: open Code once in the app, then come back.',
+             '这个号的 Code 页还没有列表：先在 App 里打开一次 Code 页。'],
+  noSource: ['No other account has sessions to copy.', '别的号没有可搬的会话。'],
+  from: ['from', '从'],
+  span: ['used in', '范围'],
+  d3: ['3 days', '3 天'],
+  d7: ['7 days', '7 天'],
+  all: ['all', '全部'],
+  moveTo: ['Copy into', '搬到'],
+  confirm: ['Press again: quit the app, copy, reopen', '再按一次：关掉 App，搬完再打开'],
+  undo: ['Undo the last move', '撤回上次搬家'],
+  undoConfirm: ['Press again: quit the app, undo, reopen', '再按一次：关掉 App，撤回后再打开'],
+  lastMove: ['Last move', '上次搬家'],
+  ok: ['went through', '搬好了'],
+  failed: ['did not go through', '没搬成'],
+  copyOnly: ['It copies and never deletes, and backs up the list first; the first press only shows what would change.',
+             '只拷贝不删除，搬之前先备份；第一次按只是预览，什么都不改。'],
 } as const
 let zh = false
 const t = (k: keyof typeof T) => T[k][zh ? 1 : 0]
@@ -67,6 +90,11 @@ function percent(r: QuotaRow) {
 function clock(sec: number) {
   const d = new Date(sec * 1000)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function day(sec: number) {
+  const d = new Date(sec * 1000)
+  return `${d.getMonth() + 1}-${d.getDate()} ${clock(sec)}`
 }
 
 function quotaLine(q: Quota) {
@@ -106,6 +134,25 @@ async function search($: EngineInterface, q: string) {
   const r = await cm($, ['find', '--json', '--limit', '30', ...words.split(/\s+/)], 180000)
   await update($, found, () => ({ q: words, rows: r.ok ? (JSON.parse(r.out) as Hit[]) : [] }))
   await update($, note, () => (r.ok ? '' : r.err.split('\n').pop() ?? ''))
+}
+
+async function refreshDesk($: EngineInterface) {
+  const r = await cm($, ['list', '--json'])
+  if (r.ok) await update($, desk, () => JSON.parse(r.out) as Desk)
+  else if (r.err) await update($, note, () => r.err)
+}
+
+const spanArgs = (s: Span) => (s === 'all' ? ['--all'] : ['--days', s])
+
+// The first press shows what would change (a dry run) and arms the button; the second does it with --app,
+// which inside the desktop app hands the work to a claude-move of its own, as quitting the app ends this mod.
+async function press($: EngineInterface, which: 'move' | 'undo', args: string[]) {
+  const m = await read($, mv)
+  const armed = m.armed === which
+  const r = await cm($, [...args, armed ? '--app' : '--dry-run'], 180000)
+  const next: Mv['armed'] = armed || !r.ok ? '' : which
+  await update($, mv, cur => ({ ...cur, armed: next, log: (r.out.trim() || r.err).trim() }))
+  if (armed) await refreshDesk($)
 }
 
 async function openPane($: EngineInterface) {
@@ -161,8 +208,8 @@ export const register: Register = on => {
     const { Box, Text, Button } = els
     // the phone draws no field yet (its table hands out a stand-in): /cm-find searches there
     const Input = e.surface !== 'mobile' && 'Input' in els ? els.Input : null
-    const [rows, q, hits, which, msg, edit] = await Promise.all([
-      read($, live), read($, quota), read($, found), read($, tab), read($, note), read($, editing),
+    const [rows, q, hits, which, msg, edit, d, m] = await Promise.all([
+      read($, live), read($, quota), read($, found), read($, tab), read($, note), read($, editing), read($, desk), read($, mv),
     ])
     const room = Math.max(3, (e.viewport?.rows ?? 30) - 8)
 
@@ -183,8 +230,10 @@ export const register: Register = on => {
             onPress={() => update($, tab, () => 'live' as Tab)}>{`${t('live')} ${rows.length}`}</Button>
           <Button key="tab-find" variant={which === 'find' ? 'primary' : undefined}
             onPress={() => update($, tab, () => 'find' as Tab)}>{t('find')}</Button>
+          <Button key="tab-move" variant={which === 'move' ? 'primary' : undefined}
+            onPress={async () => { await update($, tab, () => 'move' as Tab); await refreshDesk($) }}>{t('move')}</Button>
           <Button key="refresh" plain label="↻" hotkey="r"
-            onPress={() => Promise.all([refreshLive($), refreshQuota($)])} />
+            onPress={() => Promise.all([refreshLive($), refreshQuota($), refreshDesk($)])} />
         </Box>
       </Box>
     )
@@ -249,10 +298,67 @@ export const register: Register = on => {
       </Box>
     )
 
+    const signed = d?.rows.find(r => r.acct === d.signed)
+    const named = (acct: string) => d?.rows.find(r => r.acct === acct)?.name || acct.slice(0, 8)
+    const sources = (d?.rows ?? []).filter(r => r.acct !== d?.signed && r.live > 0).sort((a, b) => b.last - a.last)
+    const src = sources.find(r => r.acct === m.src) ?? sources[0]
+    const choose = (patch: Partial<Mv>) => update($, mv, (cur): Mv => ({ ...cur, ...patch, armed: '', log: '' }))
+    const moveArgs = signed && src ? ['to', signed.acct, '--from', src.acct, ...spanArgs(m.span)] : []
+    const movePage = (
+      <Box flexDirection="column" rowGap={1}>
+        {!d ? <Text dimColor>…</Text>
+          : !d.signed ? <Text>{t('noSigned')}</Text>
+          : (
+            <Box flexDirection="column">
+              <Text>{t('signedIn')} <Text bold>{named(d.signed)}</Text></Text>
+              {!signed && <Text>{t('noFolder')}</Text>}
+            </Box>
+          )}
+        {signed && sources.length === 0 && <Text dimColor>{t('noSource')}</Text>}
+        {signed && src && (
+          <Box flexDirection="column" rowGap={1}>
+            <Box columnGap={1} flexWrap="wrap">
+              <Text dimColor>{t('from')}</Text>
+              {sources.map(r => (
+                <Button key={`src-${r.acct}`} variant={r.acct === src.acct ? 'primary' : undefined}
+                  onPress={() => choose({ src: r.acct })}>{`${named(r.acct)} ${r.live}`}</Button>
+              ))}
+            </Box>
+            <Box columnGap={1}>
+              <Text dimColor>{t('span')}</Text>
+              {(['3', '7', 'all'] as Span[]).map(s => (
+                <Button key={`span-${s}`} variant={m.span === s ? 'primary' : undefined}
+                  onPress={() => choose({ span: s })}>{t(s === '3' ? 'd3' : s === '7' ? 'd7' : 'all')}</Button>
+              ))}
+            </Box>
+            <Box columnGap={1} flexWrap="wrap">
+              <Button key="move-go" variant="primary"
+                onPress={() => press($, 'move', moveArgs)}>
+                {m.armed === 'move' ? t('confirm') : `${t('moveTo')} ${named(signed.acct)}`}
+              </Button>
+              <Button key="move-undo" variant={m.armed === 'undo' ? 'primary' : undefined}
+                onPress={() => press($, 'undo', ['undo'])}>
+                {m.armed === 'undo' ? t('undoConfirm') : t('undo')}
+              </Button>
+            </Box>
+            <Text dimColor>{t('copyOnly')}</Text>
+          </Box>
+        )}
+        {d?.last_move && (
+          <Text dimColor>{t('lastMove')} {day(d.last_move.at)}: {d.last_move.ok ? t('ok') : t('failed')}</Text>
+        )}
+        {m.log && (
+          <Box flexDirection="column">
+            {m.log.split('\n').slice(0, Math.max(3, room - 8)).map(line => <Text dimColor wrap="truncate-end">{line}</Text>)}
+          </Box>
+        )}
+      </Box>
+    )
+
     return (
       <Box flexDirection="column" rowGap={1}>
         {head}
-        {which === 'live' ? liveList : findList}
+        {which === 'live' ? liveList : which === 'find' ? findList : movePage}
         {msg && <Text dimColor wrap="truncate-end">{msg}</Text>}
       </Box>
     )

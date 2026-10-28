@@ -76,11 +76,11 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 
 | Command | What it does |
 |---|---|
-| `claude-move list` | Accounts on this Mac, live/archived session counts, which one was used last |
+| `claude-move list [--json]` | Accounts on this Mac, live/archived session counts, which one was used last. `--json` adds the account the desktop app is signed into and the last `--app` move, for the mod |
 | `claude-move sessions <account>` | Live sessions of one account |
 | `claude-move name <account> <label>` | Give an account a short label, e.g. `work`, `personal` |
-| `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them |
-| `claude-move undo [--list] [--backup NAME] [--dry-run]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too |
+| `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run] [--app]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them. `--app` quits the desktop app first and opens it again afterwards; started inside the app, it hands the work to a copy of claude-move running on its own, which sends a notification when it is done |
+| `claude-move undo [--list] [--backup NAME] [--dry-run] [--app]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too. `--app` as for `to` |
 | `claude-move usage [--refresh] [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % from the CLI. `--refresh` asks `/usage` of each signed-in CLI folder first; `--html` opens a panel page; `--json` prints the numbers for the mod |
 | `claude-move panel [--demo]` | The same panel in your browser, served on 127.0.0.1 only, with a button that moves your sessions after you switch accounts (see below). `--demo` shows sample accounts instead, reads nothing on this computer and its buttons do nothing: for screenshots, or a look before you set anything up |
 | `claude-move app install [--icon IMAGE] [--no-dock]` | Make `~/Applications/Claude Move.app` and put it in the Dock: double-click it to open the panel, no Terminal needed |
@@ -90,7 +90,7 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 | `claude-move notify on\|off\|status\|test [--levels 75,90,95]` | macOS notifications when an account's official % passes each level, once per reset window (on by default). Once a week, the first time the panel or `usage` reads your use, a summary of last week: total at API prices, the account that used most, the busiest day |
 | `claude-move doctor [--refresh]` | Check labels, CLI logins (and whether `/usage` answers in each), accounts that show up in two folders, desktop accounts without a CLI login, the status line recorder and the app's signature |
 | `claude-move watch install` / `uninstall` | Record the official 5-hour/weekly % each time the CLI status line refreshes; keeps your existing status line |
-| `claude-move fm-pin [<account>]` | For [firstmate](https://github.com/kunchenguid/firstmate): show which CLI login its Claude crews use, or pin them to one. It checks that login answers `/usage` and is not cooling (`--force` pins it anyway), writes firstmate's `config/claude-account`, and points the quota snapshot at it. Crews started after that use it; running ones stay where they are |
+| `claude-move fm-pin [<account>] [--group crews\|resident] [--relaunch]` | For [firstmate](https://github.com/kunchenguid/firstmate): show which CLI login each group uses, or pin a group to one. It checks that login answers `/usage` and is not cooling (`--force` pins it anyway). The crews (the default group) are pinned in firstmate's `config/claude-account` and in each second mate's own home, and the quota snapshot follows them; crews started after that use it, running ones stay where they are. `--group resident` pins the second mates themselves (`config/secondmate-accounts/<id>/claude-account`); each takes it when relaunched, and `--relaunch` relaunches the idle ones through firstmate's `bin/fm-control.sh` |
 | `claude-move quota-snapshot [--refresh] [--account A] [--out FILE]` | Write one account's official % in quota-axi's cache format, so firstmate's quota-axi reads it through `QUOTA_AXI_SNAPSHOT` without touching the login or the Keychain (see below). `schedule [--every 10]` / `unschedule`: refresh it every few minutes (launchd on macOS, Task Scheduler on Windows); `status` shows the pin, the file and the schedule |
 | `claude-move find <words> [--account A] [--json]` | Search what was said in the terminal sessions of every CLI login: your prompts, Claude's replies and session titles (not tool output). Each hit shows the account, project, a snippet, whether it is running, and `claude-move resume <id>`. The first search reads every transcript once into `~/.cache/claude-move/search.db` (readable only by you); later ones read only what is new |
 | `claude-move resume <id> [--to <account>] [--here]` | Resume a terminal session in its own folder with its own login: in a new tmux window when tmux is running, else a new terminal window; `--here` in this one. `--to` copies it into another account's CLI login first (copy only, as `run` does) and resumes it there. A session that is already running is not started twice |
@@ -191,8 +191,10 @@ keeps for its running processes; those are not documented and may change.
 
 The same terminal-session list, quota and search can sit beside the chat in Claude Code, as a mod in [`mod/`](mod/):
 quota per account in the status line, `/cm` for the running sessions (📌 pin, ✎ name, → go there) and
-`/cm-find <words>` to search and resume. Its buttons run claude-move, which has to be installed. Moving sessions
-between desktop-app accounts stays here, since it quits and reopens the app the mod runs in.
+`/cm-find <words>` to search and resume. Its Move page copies the desktop app's sessions into the account the app
+is signed into now: the first press shows what would change, the second quits the app, copies (backup first) and
+opens it again, through `claude-move to --app`, which runs on its own so quitting the app does not stop it. Undo the
+last move there the same way. Its buttons run claude-move, which has to be installed.
 
 ```
 /plugin install cmove --marketplace Layla-NL/claude-move
@@ -248,6 +250,7 @@ writes that file from the official numbers it already has:
 
 ```bash
 claude-move fm-pin outlook             # crews use ~/.claude-outlook; the snapshot follows
+claude-move fm-pin gmail --group resident   # the second mates use gmail once relaunched
 claude-move quota-snapshot schedule    # refresh it every 10 minutes
 export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # in firstmate's start-up
 ```
@@ -321,9 +324,9 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 4. 重新打开 App。
 
 **命令：**
-- `list` 看有哪些账号；`sessions <账号>` 看某个账号的会话；`name <账号> <名字>` 起个好记的名字。
-- `to <目标> [--from 来源] [--days N] [--all] [--only 文字] [--dry-run]`：搬最近 N 天（默认 3 天）用过、没归档的会话；`--only` 按标题或 id 挑着搬。搬之前会列出这些会话发布过的 artifact，提醒它们还归创建它的账号。
-- `undo [--list] [--backup 名字] [--dry-run]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。
+- `list` 看有哪些账号（`--json` 还会给出桌面 App 现在登录的号和上次用 `--app` 搬的结果，给 mod 用）；`sessions <账号>` 看某个账号的会话；`name <账号> <名字>` 起个好记的名字。
+- `to <目标> [--from 来源] [--days N] [--all] [--only 文字] [--dry-run] [--app]`：搬最近 N 天（默认 3 天）用过、没归档的会话；`--only` 按标题或 id 挑着搬。搬之前会列出这些会话发布过的 artifact，提醒它们还归创建它的账号。`--app` 会先退出桌面 App，搬完再打开；如果是在 App 里面运行的，就交给一个独立运行的 claude-move 去做，做完弹通知。
+- `undo [--list] [--backup 名字] [--dry-run] [--app]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。`--app` 同 `to`。
 - `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
 - `usage [--refresh] [--html] [--json] [--config 目录]`：各账号额度面板；`--refresh` 先向每个命令行登录问官方 `/usage`，`--html` 打开网页版，`--json` 输出给 mod 用的数字。
@@ -339,7 +342,7 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 - `resume <id> [--to 账号] [--here]`：在会话自己的文件夹、用它自己的登录接着跑：tmux 开着就开一个新的 tmux 窗口，不然开新终端窗口；`--here` 就在当前终端。`--to` 先把会话复制到另一个号的命令行登录（只复制，和 `run` 一样）再在那边接上。已经在跑的会话不会再开第二个。
 - `ps [--go 目标] [--label 目标 名字] [--pin|--unpin 目标…] [--json]`：现在在跑的 Claude Code 会话，所有命令行登录都算：账号、忙还是空闲、在哪个 tmux 窗口、名字、文件夹。`--go` 切过去（按 tmux 目标、会话 id 开头或进程号），在连着 tmux 的终端里显示，没有就开一个终端连上。`--label` 给会话起你自己的名字（写 `""` 去掉），存在 `~/.config/claude-move/labels.json`，`ps`、tmux 菜单、面板和 `find` 都先用它；claude-move 起名的窗口跟着改，别的工具起名的窗口（firstmate 的 `fm-*`）名字不动。`--pin` 把会话置顶（📌），`ps`、tmux 菜单和面板里都排最前，可以一次写好几个；`--unpin` 取消，会话结束了也能按 id 取消。
 - `tmux [name|line|menu|conf]`：`name` 把只装着一个 Claude 会话的 tmux 窗口改名成“账号·会话名”（忙的时候前面有 ●）；别人起过名的窗口（比如 firstmate 的）不动。`line` 输出给状态栏用的各账号会话数，`menu` 弹出会话菜单。`conf --install` 往 `~/.tmux.conf` 加一段（先备份）把这些接上：开鼠标、状态栏每 15 秒显示一次 `line`、前缀键 + S 弹菜单；`conf --remove` 去掉这段并恢复 tmux 默认。
-- `fm-pin [<账号>]`：给 [firstmate](https://github.com/kunchenguid/firstmate) 用。不带账号时列出各命令行登录的官方额度、船员现在用哪个；带账号时先确认这个登录 `/usage` 能回、没在冷却（`--force` 照样钉），写 firstmate 的 `config/claude-account`，快照也跟着换到这个号。之后新起的船员用它，已经在跑的不变。
+- `fm-pin [<账号>] [--group 船员|常驻] [--relaunch]`：给 [firstmate](https://github.com/kunchenguid/firstmate) 用，按组换号。不带账号时列出各命令行登录的官方额度，以及船员、常驻两组各用哪个号；带账号时先确认这个登录 `/usage` 能回、没在冷却（`--force` 照样钉）。默认换的是船员组：写 firstmate 的 `config/claude-account`，每个二副自己家里的那份也一起改，快照跟着换到这个号；之后新起的船员用它，已经在跑的不变。`--group 常驻` 换的是二副本身（`config/secondmate-accounts/<id>/claude-account`），每个二副重启后才生效，加 `--relaunch` 会通过 firstmate 的 `bin/fm-control.sh` 重启空闲的那些。
 - `quota-snapshot [--refresh] [--account 账号] [--out 文件]`：把一个号的官方百分比写成 quota-axi 的缓存格式，firstmate 的 quota-axi 通过 `QUOTA_AXI_SNAPSHOT` 读它，不碰登录和钥匙串（见下面）。`schedule [--every 10]` / `unschedule` 定时刷新（macOS 用 launchd，Windows 用任务计划程序）；`status` 看钉的号、文件和定时。
 
 **额度面板：** `claude-move usage` 把几个号放在一起看，告诉你该换到哪个：
@@ -365,7 +368,7 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 - **接下来 7 天：** 每个号一条线，每项官方额度在它重置的时间点上有个圆点（颜色看那项用了多少），冷却中的号有条红条一直到恢复。刻度在“现在”附近拉开，接下来几个小时看得清楚。
 - **搜会话**（右上角）：按标题搜所有号在桌面 App 里的会话。搜到别的号的会话，旁边有个按钮能把它拷到桌面 App 现在登录的号（会关掉再重开 App）。下面接着是终端会话，按聊过的内容搜（`find`），每条有“接着做”（`resume`），正在跑的有“过去”，还能复制手动接上的命令。
 - **终端会话**（卡片下面）：这台 Mac 上正在跑的 Claude Code 会话，所有命令行登录都算（`ps`），置顶的在最前，然后是忙的，每 10 秒刷新；图钉按钮把它置顶或取消，“过去”打开它所在的 tmux 窗口。旁边的按钮给 tmux 窗口起名（`tmux name`），以及装上 / 撤掉 `~/.tmux.conf` 那段（`tmux conf`，装之前先给你看内容）。列表来自 Claude Code 给运行中进程记的 `sessions/<pid>.json`，这个格式没有文档，以后可能会变。
-- **放进 Claude Code 里（cmove mod）**：同样的终端会话列表、额度和搜索，也可以作为 mod 放在 Claude Code 的对话旁边，代码在 [`mod/`](mod/)。状态栏显示各号额度，`/cm` 打开在跑的会话（📌 置顶、✎ 起名、→ 过去），`/cm-find 关键词` 搜索并接着做。按钮背后跑的是 claude-move，所以本体要先装上。桌面 App 换号搬会话还是留在本体里：搬会话要关掉再重开 App，而 mod 就运行在 App 里面。安装：在终端会话里输入 `/plugin install cmove --marketplace Layla-NL/claude-move`。
+- **放进 Claude Code 里（cmove mod）**：同样的终端会话列表、额度和搜索，也可以作为 mod 放在 Claude Code 的对话旁边，代码在 [`mod/`](mod/)。状态栏显示各号额度，`/cm` 打开在跑的会话（📌 置顶、✎ 起名、→ 过去），`/cm-find 关键词` 搜索并接着做。“搬会话”页把桌面 App 的会话拷到 App 现在登录的号：第一次按只预览要搬什么，第二次按才会关掉 App、搬（先备份）、再打开。背后是 `claude-move to --app`，它独立运行，所以 App 关掉也不会打断它。上次搬家也能在这里同样两下撤回。按钮背后跑的是 claude-move，所以本体要先装上。安装：在终端会话里输入 `/plugin install cmove --marketplace Layla-NL/claude-move`。
 - **快捷键：** 1–9 打开对应卡片的终端，/ 搜索，R 刷新官方百分比，Esc 关闭。
 - 浏览器标签页显示桌面 App 登录的那个号：图标是它的球，标题是它的数字。
 - 底部 Dock 里的“点缀”调节球里第二种颜色的多少；右上角能切换浅色 / 深色 / 跟随系统，以及中文 / English。这几项都存在 `~/.config/claude-move/look.json`，下次打开还是你选的。
@@ -390,6 +393,7 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 
 ```bash
 claude-move fm-pin outlook             # 船员用 ~/.claude-outlook，快照跟着它
+claude-move fm-pin gmail --group 常驻   # 二副重启后用 gmail
 claude-move quota-snapshot schedule    # 每 10 分钟刷新一次
 export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # 写进 firstmate 的启动脚本
 ```
