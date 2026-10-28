@@ -1690,6 +1690,12 @@ def cmd_usage(args):
         print()
     print(t("u_scan"), file=sys.stderr)
     rep = usage_report(args.config or ())
+    if args.json:  # for the Claude Code mod: official numbers and use per account, nothing else happens
+        keys = ("acct", "name", "plan", "cool", "week_usd", "five_usd", "week_reset", "official")
+        print(json.dumps({"now": rep["now"], "pick": (rep["pick"] or {}).get("name"),
+                          "rows": [{k: r[k] for k in keys} for r in rep["rows"]],
+                          "unmapped_usd": round(rep["unmapped_usd"], 2)}, ensure_ascii=False))
+        return
     maybe_week_summary(rep)
     print(t("u_title"))
     for r in rep["rows"]:
@@ -4926,6 +4932,9 @@ def cmd_find(args):
     if args.account and not cfg:
         sys.exit(t("t_none", t=args.account))
     rows = find_sessions(words, args.config or (), args.limit, cli_account(cfg) if cfg else None)
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False))
+        return
     q = " ".join(words)
     if not rows:
         print(t("f_none", q=q))
@@ -6148,6 +6157,7 @@ def main(argv=None):
     us.add_argument("--html", action="store_true", help="also write a panel page and open it")
     us.add_argument("--no-open", action="store_true", help="with --html: write the page but do not open it")
     us.add_argument("--config", action="append", help="also read transcripts from this CLI config folder (repeatable)")
+    us.add_argument("--json", action="store_true", help="print the numbers per account as JSON (for the Claude Code mod)")
     us.add_argument("--refresh", action="store_true",
                     help="first ask the official /usage of every signed-in CLI config folder (~/.claude, ~/.claude-*)")
     us.set_defaults(fn=cmd_usage)
@@ -6219,6 +6229,7 @@ def main(argv=None):
     fd.add_argument("words", nargs="+", help="words that must all be in the session (any case)")
     fd.add_argument("--account", help="only this account's CLI login")
     fd.add_argument("--limit", type=int, default=20, help="at most this many sessions (default 20)")
+    fd.add_argument("--json", action="store_true", help="print the hits as JSON")
     fd.add_argument("--config", action="append", help="also search this CLI config folder (repeatable)")
     fd.set_defaults(fn=cmd_find)
     rs = sub.add_parser("resume", help="resume a terminal session in a new tmux window (or terminal window), in its folder, "

@@ -1,0 +1,15 @@
+{
+  "name": "layla-nl",
+  "owner": {
+    "name": "Layla",
+    "url": "https://github.com/Layla-NL"
+  },
+  "description": "claude-move's Claude Code mod",
+  "plugins": [
+    {
+      "name": "cmove",
+      "source": "./mod",
+      "description": "claude-move inside Claude Code: quota in the status line, running sessions (pin, name, go there) and search with resume"
+    }
+  ]
+}
