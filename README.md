@@ -76,11 +76,11 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 
 | Command | What it does |
 |---|---|
-| `claude-move list` | Accounts on this Mac, live/archived session counts, which one was used last |
+| `claude-move list [--json]` | Accounts on this Mac, live/archived session counts, which one was used last. `--json` adds the account the desktop app is signed into and the last `--app` move, for the mod |
 | `claude-move sessions <account>` | Live sessions of one account |
 | `claude-move name <account> <label>` | Give an account a short label, e.g. `work`, `personal` |
-| `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them |
-| `claude-move undo [--list] [--backup NAME] [--dry-run]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too |
+| `claude-move to <target> [--from <source>] [--days N] [--all] [--only TEXT] [--dry-run] [--app]` | Copy live sessions used in the last N days (default 3) from the source (default: the most recently used account) to the target. `--only` picks sessions by title text or id prefix (repeatable). Lists any artifacts those sessions published, because those stay with the account that created them. `--app` quits the desktop app first and opens it again afterwards; started inside the app, it hands the work to a copy of claude-move running on its own, which sends a notification when it is done |
+| `claude-move undo [--list] [--backup NAME] [--dry-run] [--app]` | Put the target account's list back exactly as it was before the last move: replaced entries are restored, added ones removed. The state right before the undo is saved too. `--app` as for `to` |
 | `claude-move usage [--refresh] [--html] [--config DIR]` | Quota per account: cooling and reset times, use this week and in the last 5 hours, official % from the CLI. `--refresh` asks `/usage` of each signed-in CLI folder first; `--html` opens a panel page; `--json` prints the numbers for the mod |
 | `claude-move panel [--demo]` | The same panel in your browser, served on 127.0.0.1 only, with a button that moves your sessions after you switch accounts (see below). `--demo` shows sample accounts instead, reads nothing on this computer and its buttons do nothing: for screenshots, or a look before you set anything up |
 | `claude-move app install [--icon IMAGE] [--no-dock]` | Make `~/Applications/Claude Move.app` and put it in the Dock: double-click it to open the panel, no Terminal needed |
@@ -191,8 +191,10 @@ keeps for its running processes; those are not documented and may change.
 
 The same terminal-session list, quota and search can sit beside the chat in Claude Code, as a mod in [`mod/`](mod/):
 quota per account in the status line, `/cm` for the running sessions (📌 pin, ✎ name, → go there) and
-`/cm-find <words>` to search and resume. Its buttons run claude-move, which has to be installed. Moving sessions
-between desktop-app accounts stays here, since it quits and reopens the app the mod runs in.
+`/cm-find <words>` to search and resume. Its Move page copies the desktop app's sessions into the account the app
+is signed into now: the first press shows what would change, the second quits the app, copies (backup first) and
+opens it again, through `claude-move to --app`, which runs on its own so quitting the app does not stop it. Undo the
+last move there the same way. Its buttons run claude-move, which has to be installed.
 
 ```
 /plugin install cmove --marketplace Layla-NL/claude-move
@@ -321,9 +323,9 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 4. 重新打开 App。
 
 **命令：**
-- `list` 看有哪些账号；`sessions <账号>` 看某个账号的会话；`name <账号> <名字>` 起个好记的名字。
-- `to <目标> [--from 来源] [--days N] [--all] [--only 文字] [--dry-run]`：搬最近 N 天（默认 3 天）用过、没归档的会话；`--only` 按标题或 id 挑着搬。搬之前会列出这些会话发布过的 artifact，提醒它们还归创建它的账号。
-- `undo [--list] [--backup 名字] [--dry-run]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。
+- `list` 看有哪些账号（`--json` 还会给出桌面 App 现在登录的号和上次用 `--app` 搬的结果，给 mod 用）；`sessions <账号>` 看某个账号的会话；`name <账号> <名字>` 起个好记的名字。
+- `to <目标> [--from 来源] [--days N] [--all] [--only 文字] [--dry-run] [--app]`：搬最近 N 天（默认 3 天）用过、没归档的会话；`--only` 按标题或 id 挑着搬。搬之前会列出这些会话发布过的 artifact，提醒它们还归创建它的账号。`--app` 会先退出桌面 App，搬完再打开；如果是在 App 里面运行的，就交给一个独立运行的 claude-move 去做，做完弹通知。
+- `undo [--list] [--backup 名字] [--dry-run] [--app]`：把目标账号的列表恢复成上次搬之前的样子，换掉的放回去，新加的拿掉；撤回前的样子也另存一份。`--app` 同 `to`。
 - `import-cli --config 目录 [--project 路径] [--session id] [--days N] [--dry-run]`：把另一个配置目录（比如用 `CLAUDE_CONFIG_DIR=~/.claude-work` 登录的另一个账号）里的命令行会话记录拷到 `~/.claude`，桌面 App 就能打开；从不覆盖。
 
 - `usage [--refresh] [--html] [--json] [--config 目录]`：各账号额度面板；`--refresh` 先向每个命令行登录问官方 `/usage`，`--html` 打开网页版，`--json` 输出给 mod 用的数字。
@@ -365,7 +367,7 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 - **接下来 7 天：** 每个号一条线，每项官方额度在它重置的时间点上有个圆点（颜色看那项用了多少），冷却中的号有条红条一直到恢复。刻度在“现在”附近拉开，接下来几个小时看得清楚。
 - **搜会话**（右上角）：按标题搜所有号在桌面 App 里的会话。搜到别的号的会话，旁边有个按钮能把它拷到桌面 App 现在登录的号（会关掉再重开 App）。下面接着是终端会话，按聊过的内容搜（`find`），每条有“接着做”（`resume`），正在跑的有“过去”，还能复制手动接上的命令。
 - **终端会话**（卡片下面）：这台 Mac 上正在跑的 Claude Code 会话，所有命令行登录都算（`ps`），置顶的在最前，然后是忙的，每 10 秒刷新；图钉按钮把它置顶或取消，“过去”打开它所在的 tmux 窗口。旁边的按钮给 tmux 窗口起名（`tmux name`），以及装上 / 撤掉 `~/.tmux.conf` 那段（`tmux conf`，装之前先给你看内容）。列表来自 Claude Code 给运行中进程记的 `sessions/<pid>.json`，这个格式没有文档，以后可能会变。
-- **放进 Claude Code 里（cmove mod）**：同样的终端会话列表、额度和搜索，也可以作为 mod 放在 Claude Code 的对话旁边，代码在 [`mod/`](mod/)。状态栏显示各号额度，`/cm` 打开在跑的会话（📌 置顶、✎ 起名、→ 过去），`/cm-find 关键词` 搜索并接着做。按钮背后跑的是 claude-move，所以本体要先装上。桌面 App 换号搬会话还是留在本体里：搬会话要关掉再重开 App，而 mod 就运行在 App 里面。安装：在终端会话里输入 `/plugin install cmove --marketplace Layla-NL/claude-move`。
+- **放进 Claude Code 里（cmove mod）**：同样的终端会话列表、额度和搜索，也可以作为 mod 放在 Claude Code 的对话旁边，代码在 [`mod/`](mod/)。状态栏显示各号额度，`/cm` 打开在跑的会话（📌 置顶、✎ 起名、→ 过去），`/cm-find 关键词` 搜索并接着做。“搬会话”页把桌面 App 的会话拷到 App 现在登录的号：第一次按只预览要搬什么，第二次按才会关掉 App、搬（先备份）、再打开。背后是 `claude-move to --app`，它独立运行，所以 App 关掉也不会打断它。上次搬家也能在这里同样两下撤回。按钮背后跑的是 claude-move，所以本体要先装上。安装：在终端会话里输入 `/plugin install cmove --marketplace Layla-NL/claude-move`。
 - **快捷键：** 1–9 打开对应卡片的终端，/ 搜索，R 刷新官方百分比，Esc 关闭。
 - 浏览器标签页显示桌面 App 登录的那个号：图标是它的球，标题是它的数字。
 - 底部 Dock 里的“点缀”调节球里第二种颜色的多少；右上角能切换浅色 / 深色 / 跟随系统，以及中文 / English。这几项都存在 `~/.config/claude-move/look.json`，下次打开还是你选的。

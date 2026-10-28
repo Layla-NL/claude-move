@@ -70,10 +70,10 @@ class ClaudeMove(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_tool(self, *args):
+    def run_tool(self, *args, **extra):
         env = dict(os.environ, CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root),
-                   CLAUDE_MOVE_DESKTOP_CONFIG=str(self.home / "desk"),
-                   CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1")
+                   CLAUDE_MOVE_DESKTOP_CONFIG=str(self.home / "desk"), CLAUDE_MOVE_LOGS=str(self.home / "logs"),
+                   CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_SKIP_APP_CHECK="1", **extra)
         return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True, encoding="utf-8", env=env)
 
     def test_list_marks_most_recent(self):
@@ -115,6 +115,41 @@ class ClaudeMove(unittest.TestCase):
         self.assertEqual(self.run_tool("name", "bbbb", "work").returncode, 0)
         r = self.run_tool("to", "work", "--dry-run")
         self.assertIn("to work", r.stdout)
+
+    def test_list_json(self):
+        (self.home / "logs").mkdir()
+        (self.home / "logs" / "main.log").write_text("2026-10-28 10:00:00 [info] cacheKey=acct:bbbb2222-0000-0000-0000-000000000000\n")
+        r = self.run_tool("list", "--json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual(d["signed"], "bbbb2222-0000-0000-0000-000000000000")
+        self.assertEqual({x["acct"]: x["live"] for x in d["rows"]}, {"aaaa1111": 2, "bbbb2222": 0})
+        self.assertIsNone(d["last_move"])
+
+    def test_app_move_inside_the_app_is_handed_off(self):
+        sent = self.home / "sent.txt"
+        r = self.run_tool("to", "bbbb", "--app", CLAUDE_MOVE_INSIDE_APP="1", CLAUDE_MOVE_HANDOFF_WAIT="0",
+                          CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("takes it from here", r.stdout)
+        last = self.home / ".config" / "claude-move" / "last-move.json"
+        for _ in range(100):  # the copy on its own finishes after this one returned
+            if last.exists() and sent.exists():
+                break
+            time.sleep(0.1)
+        m = json.loads(last.read_text(encoding="utf-8"))
+        self.assertTrue(m["ok"], m)
+        self.assertIn("recent", m["log"])
+        self.assertEqual(sorted(p.name for p in self.b.iterdir()), ["local_1.json"])
+        self.assertIn("Done", sent.read_text(encoding="utf-8"))
+        self.assertEqual(json.loads(self.run_tool("list", "--json").stdout)["last_move"]["ok"], True)
+
+    def test_app_undo_outside_the_app_runs_here(self):
+        self.run_tool("to", "bbbb")
+        r = self.run_tool("undo", "--app")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(list(self.b.iterdir()), [])
+        self.assertTrue((self.home / ".config" / "claude-move" / "last-move.json").exists())
 
     def test_unknown_account(self):
         r = self.run_tool("to", "zzzz")

@@ -9,7 +9,7 @@
     {
       "name": "cmove",
       "source": "./mod",
-      "description": "claude-move inside Claude Code: quota in the status line, running sessions (pin, name, go there) and search with resume"
+      "description": "claude-move inside Claude Code: quota in the status line, running sessions (pin, name, go there), search with resume, and moving the desktop app's sessions between accounts"
     }
   ]
 }

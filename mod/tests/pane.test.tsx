@@ -26,12 +26,24 @@ const USAGE = {
   ],
 }
 
+const DESK = {
+  signed: 'g', last_move: null,
+  rows: [
+    { acct: 'g', name: 'gmail', last: 1, live: 0 },
+    { acct: 'o', name: 'outlook', last: 3, live: 12 },
+    { acct: 'm', name: 'main', last: 2, live: 4 },
+  ],
+}
+
 // claude-move stands in: each command answers what the real one prints, and every argv is kept
 function fakeTool(on: any, ran: string[][]) {
   on('process.run', (_: unknown, e: { argv: string[] }) => {
     ran.push([...e.argv])
     const out = e.argv[1] === 'ps' && e.argv[2] === '--json' ? JSON.stringify(PS)
       : e.argv[1] === 'usage' ? JSON.stringify(USAGE)
+      : e.argv[1] === 'list' ? JSON.stringify(DESK)
+      : e.argv[1] === 'to' && e.argv.includes('--dry-run') ? 'From outlook to gmail: 1 session(s)\n  add: 额度快照  [10-28 15:00]\n'
+      : e.argv[1] === 'to' ? 'claude-move takes it from here\n'
       : e.argv[1] === 'find' ? JSON.stringify([{ sid: 'cccccccc-3', name: 'main', project: '~/x', title: '额度快照', last: 0, snippet: '…额度…', live: '' }])
       : 'done\n'
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -77,5 +89,37 @@ test('the phone gets the list without fields', async ($, on) => {
   await ui.press({ key: 'refresh' })
   expect(await ui.find({ type: 'Button', key: 'name-aaaaaaaa-1' })).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: /二副·群聊/ }))?.text).toContain('二副·群聊')
+  await ui.unmount()
+})
+
+test('moving shows what would change first, and quits the app only on the second press', async ($, on) => {
+  const ran: string[][] = []
+  fakeTool(on, ran)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'tab-move' })
+  expect((await ui.find({ type: 'Text', text: /gmail/ }))?.text).toContain('gmail')
+
+  // the most recently used other account is the source; main is one press away
+  await ui.press({ key: 'span-7' })
+  await ui.press({ key: 'move-go' })
+  expect(ran.at(-1)).toEqual(['claude-move', 'to', 'g', '--from', 'o', '--days', '7', '--dry-run'])
+  expect((await ui.find({ type: 'Text', text: /额度快照/ }))?.text).toContain('额度快照')
+  await ui.press({ key: 'move-go' })
+  expect(ran.at(-2)).toEqual(['claude-move', 'to', 'g', '--from', 'o', '--days', '7', '--app'])
+  expect(ran.at(-1)).toEqual(['claude-move', 'list', '--json'])
+
+  // choosing again disarms
+  await ui.press({ key: 'src-m' })
+  await ui.press({ key: 'move-go' })
+  expect(ran.at(-1)).toEqual(['claude-move', 'to', 'g', '--from', 'm', '--days', '7', '--dry-run'])
+  await ui.press({ key: 'span-all' })
+  await ui.press({ key: 'move-go' })
+  expect(ran.at(-1)).toEqual(['claude-move', 'to', 'g', '--from', 'm', '--all', '--dry-run'])
+
+  await ui.press({ key: 'move-undo' })
+  expect(ran.at(-1)).toEqual(['claude-move', 'undo', '--dry-run'])
+  await ui.press({ key: 'move-undo' })
+  expect(ran.at(-2)).toEqual(['claude-move', 'undo', '--app'])
+  expect(ran.at(-1)).toEqual(['claude-move', 'list', '--json'])
   await ui.unmount()
 })

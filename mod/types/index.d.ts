@@ -37,7 +37,19 @@ export type Hit = {
 
 export type Found = { q: string; rows: Hit[] }
 
-export type Tab = 'live' | 'find'
+// What `claude-move list --json` prints: the desktop app's account lists, and which one it is signed into.
+export type DeskRow = { acct: string; name: string; last: number; live: number }
+export type Desk = {
+  signed: string | null
+  last_move: { at: number; ok: boolean; log: string } | null
+  rows: DeskRow[]
+}
+
+// The move page: the account to copy from, how far back, and which button waits for its second press.
+export type Span = '3' | '7' | 'all'
+export type Mv = { src: string; span: Span; armed: '' | 'move' | 'undo'; log: string }
+
+export type Tab = 'live' | 'find' | 'move'
 
 declare module 'claude-code' {
   interface PluginState {
@@ -48,6 +60,8 @@ declare module 'claude-code' {
       tab: Tab
       note: string
       editing: string
+      desk: Shaped<Desk | null>
+      mv: Shaped<Mv>
     }
   }
 }
