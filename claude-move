@@ -476,6 +476,9 @@ T = {
     "ps_go_notmux": ("That session is not in tmux (pid {p}); its terminal window is open somewhere else.",
                      "这个会话不在 tmux 里（进程 {p}），它的终端窗口开在别处。"),
     "ps_shown": ("Showing {w}.", "已切到 {w}。"),
+    "ps_labeled": ("{w} is now called \"{n}\" in claude-move (ps, tmux menu, panel, find).",
+                   "{w} 在 claude-move 里叫“{n}”了（ps、tmux 菜单、面板、搜索）。"),
+    "ps_unlabeled": ("{w} has no claude-move name any more.", "{w} 不再用 claude-move 起的名字。"),
     "tm_none": ("tmux is not running, or not installed.", "tmux 没在跑，或者没装。"),
     "tm_named": ("Named {n} tmux windows.", "给 {n} 个 tmux 窗口起了名。"),
     "tm_menu": ("Claude sessions", "Claude 会话"),
@@ -4692,6 +4695,19 @@ INDEX_VERSION = 1
 WANTED = re.compile(rb'"type": ?"(?:user|assistant|custom-title|ai-title)"')
 TMUX_CONF = HOME / ".tmux.conf"
 TMUX_MARK = ("# >>> claude-move", "# <<< claude-move")
+LABELS = CONF / "labels.json"
+
+
+def labels():
+    """session id -> the name the user gave it in claude-move. Kept by claude-move only: transcripts, Claude Code's
+    own session names and tmux windows other tools named stay as they are."""
+    d = load(LABELS)
+    return {k: v for k, v in d.items() if isinstance(v, str) and v} if isinstance(d, dict) else {}
+
+
+def save_labels(d):
+    LABELS.parent.mkdir(parents=True, exist_ok=True)
+    LABELS.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def said(rec):
@@ -4834,7 +4850,7 @@ def find_sessions(words, extra=(), limit=20, acct=None, live=None):
         files = [db.execute("SELECT path, cfg, sid, cwd, title, ai, first, mtime FROM files WHERE path=?", (p,)).fetchone()
                  for p in hit or ()]
         files.sort(key=lambda r: r[7], reverse=True)
-        nm, who, by_sid = names(), {}, {}
+        nm, who, by_sid, lb = names(), {}, {}, labels()
         for path, cfg, sid, cwd, title, ai, first, mtime in files:
             if cfg not in who:
                 a = cli_account(Path(cfg)) or ""
@@ -4850,7 +4866,7 @@ def find_sessions(words, extra=(), limit=20, acct=None, live=None):
             m = db.execute("SELECT ts, role, text FROM msgs WHERE path=? AND text LIKE ? ESCAPE '\\' ORDER BY ts DESC LIMIT 1",
                            (path, like[0])).fetchone()
             by_sid[sid] = {"sid": sid, "acct": who[cfg][0], "name": who[cfg][1], "cfg": cfg, "cwd": cwd or "",
-                           "project": short(Path(cwd)) if cwd else "", "title": title or ai or first or t("untitled"),
+                           "project": short(Path(cwd)) if cwd else "", "title": lb.get(sid) or title or ai or first or t("untitled"),
                            "last": int(mtime * 1000), "said": m[1] if m else "", "snippet": snippet(m[2], words[0]) if m else "",
                            "also": [], "live": ""}
     finally:
@@ -5055,7 +5071,7 @@ def parent_pids():
 def live_sessions(extra=()):
     """Claude Code sessions running now, from each CLI login's sessions/<pid>.json (Claude Code's own record of its
     running processes), with the tmux pane each runs in. Busy first, then the most recently active."""
-    nm, panes, titles = names(), tmux_panes(), index_titles()
+    nm, panes, titles, lb = names(), tmux_panes(), index_titles(), labels()
     pp = parent_pids() if panes else {}
     out, seen = [], set()
     for cfg in cli_configs(extra):
@@ -5078,9 +5094,10 @@ def live_sessions(extra=()):
             cwd = str(d.get("cwd") or "")
             target, window = panes.get(up, ("", ""))
             given, ai = titles.get(sid, (None, None))
-            # a name the user gave, then the session's title, then the window's name firstmate gave, then Claude Code's
-            title = (d.get("nameSource") == "user" and d.get("name")) or given or window or ai or d.get("name") or (
-                first_prompt(tr) if tr else "")
+            # a name the user gave (in claude-move, then in Claude Code), then the session's title, then the window's
+            # name firstmate gave, then Claude Code's
+            title = lb.get(sid) or (d.get("nameSource") == "user" and d.get("name")) or given or window or ai or d.get(
+                "name") or (first_prompt(tr) if tr else "")
             out.append({"pid": pid, "sid": sid, "acct": acct, "name": nm.get(acct, acct[:8]), "cfg": str(cfg),
                         "title": str(title), "status": str(d.get("status") or ""),
                         "cwd": cwd, "project": short(Path(cwd)) if cwd else "", "started": (d.get("startedAt") or 0) / 1000,
@@ -5220,12 +5237,22 @@ def tmux_conf_on():
 
 def cmd_ps(args):
     rows = live_sessions(args.config or ())
-    if args.go:
-        tok = args.go.strip()
+    if args.go or args.label:
+        tok = (args.go or args.label[0]).strip()
         r = next((r for r in rows if tok and (r["tmux"] == tok or r["sid"].startswith(tok) or str(r["pid"]) == tok
                                               or r["tmux"].split(".")[0] == tok)), None)
         if not r:
             sys.exit(t("ps_go_none", i=tok))
+        if args.label:
+            lb, text = labels(), " ".join(args.label[1].split())
+            lb.pop(r["sid"], None)
+            if text:
+                lb[r["sid"]] = text
+            save_labels(lb)
+            print(t("ps_labeled" if text else "ps_unlabeled", w=r["tmux"] or r["sid"][:8], n=text))
+            if r["tmux"] and tmux_bin():
+                tmux_name()
+            return
         if not r["tmux"]:
             sys.exit(t("ps_go_notmux", p=r["pid"]))
         if not tmux_show(r["tmux"]):
@@ -6152,6 +6179,9 @@ def main(argv=None):
     rs.set_defaults(fn=cmd_resume)
     ps = sub.add_parser("ps", help="Claude Code sessions running now, every CLI login: busy or idle, and their tmux window")
     ps.add_argument("--go", metavar="TARGET", help="show that session's tmux window (a tmux target, session id prefix or pid)")
+    ps.add_argument("--label", nargs=2, metavar=("TARGET", "NAME"),
+                    help="call that session NAME in claude-move (\"\" takes the name off); a window claude-move "
+                         "names follows it, other tools' window names stay")
     ps.add_argument("--json", action="store_true", help="print them as JSON")
     ps.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
     ps.set_defaults(fn=cmd_ps)
