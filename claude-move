@@ -479,6 +479,8 @@ T = {
     "ps_labeled": ("{w} is now called \"{n}\" in claude-move (ps, tmux menu, panel, find).",
                    "{w} 在 claude-move 里叫“{n}”了（ps、tmux 菜单、面板、搜索）。"),
     "ps_unlabeled": ("{w} has no claude-move name any more.", "{w} 不再用 claude-move 起的名字。"),
+    "ps_pinned": ("Pinned: {w}", "已置顶：{w}"),
+    "ps_unpinned": ("Unpinned: {w}", "已取消置顶：{w}"),
     "tm_none": ("tmux is not running, or not installed.", "tmux 没在跑，或者没装。"),
     "tm_named": ("Named {n} tmux windows.", "给 {n} 个 tmux 窗口起了名。"),
     "tm_menu": ("Claude sessions", "Claude 会话"),
@@ -497,6 +499,8 @@ T = {
                     "这台电脑上正在跑的 Claude Code 会话，所有命令行登录都算，忙的在前。“过去”会打开它所在的 tmux 窗口。"),
     "pp_live_sum": ("{n} running · {b} busy", "{n} 个在跑 · {b} 个在忙"),
     "pp_go": ("Go there", "过去"),
+    "pp_pin": ("Pin to the top", "置顶"),
+    "pp_unpin": ("Unpin", "取消置顶"),
     "pp_resume": ("Resume", "接着做"),
     "pp_copy_cmd": ("Copy the command", "复制命令"),
     "pp_cli_tag": ("terminal", "终端"),
@@ -1733,6 +1737,7 @@ ICONS = {  # 24x24 stroked paths for the page's buttons
     "search": '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
     "sliders": '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
     "anchor": '<circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 10.5h8M4.5 13.5a7.5 7.5 0 0 0 15 0"/>',
+    "pin": '<path d="M9 3.5h6l-1 6 3.5 3.5v2h-11v-2L10 9.5l-1-6z"/><path d="M12 15v5.5"/>',
     "flame": '<path d="M12 21a6.5 6.5 0 0 0 6.5-6.5c0-4-3-6-4-9.5-2 1.5-3 3.5-3 5.5-1-1-1.5-2-1.5-3.5-2.5 2-4.5 4.5-4.5 7.5A6.5 6.5 0 0 0 12 21z"/>',
 }
 
@@ -4696,6 +4701,7 @@ WANTED = re.compile(rb'"type": ?"(?:user|assistant|custom-title|ai-title)"')
 TMUX_CONF = HOME / ".tmux.conf"
 TMUX_MARK = ("# >>> claude-move", "# <<< claude-move")
 LABELS = CONF / "labels.json"
+PINS = CONF / "pins.json"
 
 
 def labels():
@@ -4708,6 +4714,18 @@ def labels():
 def save_labels(d):
     LABELS.parent.mkdir(parents=True, exist_ok=True)
     LABELS.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def pins():
+    """Session ids the user pinned to the top of the running list, oldest pin first."""
+    d = load(PINS)
+    return [x for x in d if isinstance(x, str) and x] if isinstance(d, list) else []
+
+
+def set_pin(sid, on):
+    p = [x for x in pins() if x != sid] + [sid] * bool(on)
+    PINS.parent.mkdir(parents=True, exist_ok=True)
+    PINS.write_text(json.dumps(p, indent=2) + "\n", encoding="utf-8")
 
 
 def said(rec):
@@ -5071,7 +5089,7 @@ def parent_pids():
 def live_sessions(extra=()):
     """Claude Code sessions running now, from each CLI login's sessions/<pid>.json (Claude Code's own record of its
     running processes), with the tmux pane each runs in. Busy first, then the most recently active."""
-    nm, panes, titles, lb = names(), tmux_panes(), index_titles(), labels()
+    nm, panes, titles, lb, pin = names(), tmux_panes(), index_titles(), labels(), pins()
     pp = parent_pids() if panes else {}
     out, seen = [], set()
     for cfg in cli_configs(extra):
@@ -5102,8 +5120,9 @@ def live_sessions(extra=()):
                         "title": str(title), "status": str(d.get("status") or ""),
                         "cwd": cwd, "project": short(Path(cwd)) if cwd else "", "started": (d.get("startedAt") or 0) / 1000,
                         "active": max(last, (d.get("updatedAt") or 0) / 1000), "rc": bool(d.get("bridgeSessionId")),
-                        "tmux": target})
-    return sorted(out, key=lambda r: (r["status"] != "busy", -r["active"]))
+                        "tmux": target, "pin": sid in pin})
+    order = {sid: i for i, sid in enumerate(pin)}  # pinned ones keep the order they were pinned in
+    return sorted(out, key=lambda r: (not r["pin"], order.get(r["sid"], 0), r["status"] != "busy", -r["active"]))
 
 
 def status_text(s):
@@ -5189,7 +5208,7 @@ def tmux_menu(rows):
     keys = "123456789abcdefghijklmnopqrstuvwxyz"
     items = []
     for k, r in zip(keys, [r for r in rows if r["tmux"]]):
-        label = f'{"●" if r["status"] == "busy" else "○"} {r["name"]} · {r["title"] or r["project"]} · {r["tmux"]}'
+        label = f'{"●" if r["status"] == "busy" else "○"} {"📌 " * r["pin"]}{r["name"]} · {r["title"] or r["project"]} · {r["tmux"]}'
         items += [label.replace("#", "##")[:70], k, f'switch-client -t {r["tmux"]}']
     return ["display-menu", "-T", t("tm_menu"), "-x", "C", "-y", "C"] + (items or ["-" + t("tm_menu_none"), "", ""])
 
@@ -5235,12 +5254,27 @@ def tmux_conf_on():
     return TMUX_CONF.exists() and TMUX_MARK[0] in TMUX_CONF.read_text(encoding="utf-8", errors="replace")
 
 
+def ps_match(rows, tok):
+    tok = tok.strip()
+    return next((r for r in rows if tok and (r["tmux"] == tok or r["sid"].startswith(tok) or str(r["pid"]) == tok
+                                             or r["tmux"].split(".")[0] == tok)), None)
+
+
 def cmd_ps(args):
     rows = live_sessions(args.config or ())
+    if args.pin or args.unpin:
+        for tok in args.pin or args.unpin:
+            r = ps_match(rows, tok)
+            # a pin can come off a session that is not running any more, by its id
+            sid = r["sid"] if r else next((x for x in pins() if args.unpin and tok.strip() and x.startswith(tok.strip())), "")
+            if not sid:
+                sys.exit(t("ps_go_none", i=tok))
+            set_pin(sid, bool(args.pin))
+            print(t("ps_pinned" if args.pin else "ps_unpinned", w=(r["title"] or r["tmux"]) if r else sid[:8]))
+        return
     if args.go or args.label:
-        tok = (args.go or args.label[0]).strip()
-        r = next((r for r in rows if tok and (r["tmux"] == tok or r["sid"].startswith(tok) or str(r["pid"]) == tok
-                                              or r["tmux"].split(".")[0] == tok)), None)
+        tok = args.go or args.label[0]
+        r = ps_match(rows, tok)
         if not r:
             sys.exit(t("ps_go_none", i=tok))
         if args.label:
@@ -5271,7 +5305,7 @@ def cmd_ps(args):
     w = [max(wide(x) for x in col) for col in zip(*[(r["name"], status_text(r["status"]), r["tmux"] or "-") for r in rows])]
     for r in rows:
         cols = (r["name"], status_text(r["status"]), r["tmux"] or "-")
-        print("  " + "  ".join(c + " " * (n - wide(c)) for c, n in zip(cols, w)) + f'  {r["title"] or r["sid"][:8]} · {r["project"]}'
+        print("  " + "  ".join(c + " " * (n - wide(c)) for c, n in zip(cols, w)) + f'  {"📌 " * r["pin"]}{r["title"] or r["sid"][:8]} · {r["project"]}'
               + f'  ({ago(time.time() - r["started"])})' * bool(r["started"]))
 
 
@@ -5721,6 +5755,13 @@ def panel_api(method, path, q, body, extra=()):
                 return bad
             ok = tmux_show(target)
             return 200, {"ok": ok, "log": t("ps_shown", w=target) if ok else t("tm_none")}
+        if do == "pin":
+            sid = str(body.get("sid") or "")
+            r = next((r for r in live_sessions(extra) if sid and r["sid"] == sid), None)
+            if not r:
+                return bad
+            set_pin(sid, bool(body.get("on")))
+            return 200, {"ok": True, "log": t("ps_pinned" if body.get("on") else "ps_unpinned", w=r["title"] or r["sid"][:8])}
         if do == "name":
             if not tmux("list-sessions"):
                 return 200, {"ok": False, "log": t("tm_none")}
@@ -5753,6 +5794,8 @@ TOOLS_CSS = """
 .live .item .st{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--dim);flex:none;margin:0 4px}
 .live .item.busy .st{background:var(--hot);border-color:var(--hot)}
 .live .item .t{flex:1;min-width:0} .live .item b{min-width:64px}
+.live .item .ib.pin:not([aria-pressed="true"]){opacity:.35} .live .item:hover .ib.pin{opacity:1}
+.live .item.pinned+.item:not(.pinned){border-top:1px solid var(--hair)}
 .list{max-height:340px;overflow:auto;margin:8px 0}
 .item{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;padding:6px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}
 .item:last-child{border-bottom:0} .item.warn{color:var(--hot)} .dim{color:var(--dim)} .sub-item{padding-left:18px;color:var(--dim)}
@@ -5970,9 +6013,14 @@ async function loadLive() {
   rows.forEach(x => {
     const st = el("span", {className: "st"});
     st.dataset.tip = TT["ps_" + x.status] || x.status;
-    const row = el("div", {className: "item" + (x.status === "busy" ? " busy" : "")}, st, el("b", {textContent: x.name}),
+    const row = el("div", {className: "item" + (x.status === "busy" ? " busy" : "") + (x.pin ? " pinned" : "")}, st, el("b", {textContent: x.name}),
       el("span", {className: "t", textContent: (x.title || x.sid.slice(0, 8)) + " · " + x.project}),
       el("small", {className: "dim", textContent: x.tmux}));
+    const pb = el("button", {className: "ib pin", type: "button", innerHTML: '<svg class="i" aria-hidden="true"><use href="#i-pin"/></svg>'});
+    pb.dataset.tip = x.pin ? TT.pp_unpin : TT.pp_pin;
+    pb.setAttribute("aria-pressed", x.pin ? "true" : "false");
+    pb.onclick = async () => { say("lv-log", (await post("live", {do: "pin", sid: x.sid, on: !x.pin})).log); loadLive(); };
+    row.append(pb);
     if (x.tmux) {
       const b = el("button", {className: "ib", type: "button", innerHTML: '<svg class="i" aria-hidden="true"><use href="#i-term"/></svg>'});
       b.dataset.tip = TT.pp_go + " · " + x.tmux;
@@ -6006,7 +6054,7 @@ TOOLS_KEYS = ("p_working", "no_backups", "pt_move_confirm", "pt_undo_btn", "pt_u
               "pt_in_desk", "pt_runs_none", "pt_run_line", "pt_run_switch", "pt_running", "pt_ended", "pt_fix",
               "pt_rename_ask", "pt_rec_confirm", "pt_login_ask", "pt_crew_pin", "pt_crew_pinned", "pt_crew_pin_confirm",
               "pt_crew_sched_on", "pt_crew_sched_off", "ps_none", "ps_busy", "ps_idle", "pp_live_sum", "pp_go",
-              "pp_tm_conf_on", "pp_tm_conf_off", "pp_tm_conf_confirm")
+              "pp_pin", "pp_unpin", "pp_tm_conf_on", "pp_tm_conf_off", "pp_tm_conf_confirm")
 
 
 def tools_html():
@@ -6182,6 +6230,9 @@ def main(argv=None):
     ps.add_argument("--label", nargs=2, metavar=("TARGET", "NAME"),
                     help="call that session NAME in claude-move (\"\" takes the name off); a window claude-move "
                          "names follows it, other tools' window names stay")
+    pg = ps.add_mutually_exclusive_group()
+    pg.add_argument("--pin", nargs="+", metavar="TARGET", help="keep these sessions at the top of ps, the tmux menu and the panel")
+    pg.add_argument("--unpin", nargs="+", metavar="TARGET", help="take these sessions off the top")
     ps.add_argument("--json", action="store_true", help="print them as JSON")
     ps.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
     ps.set_defaults(fn=cmd_ps)

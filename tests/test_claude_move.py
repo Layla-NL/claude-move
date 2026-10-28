@@ -703,6 +703,18 @@ class Terminal(unittest.TestCase):
         self.assertIn("登录修复", self.run_tool("find", "x", CLAUDE_MOVE_TMUX=tm).stdout)
         self.run_tool("ps", "--label", self.S1[:8], "", CLAUDE_MOVE_TMUX=tm)
         self.assertEqual(json.loads(self.run_tool("ps", "--json", CLAUDE_MOVE_TMUX=tm).stdout)[0]["title"], "Login fixes")
+        # pinned sessions come first, busy or not; a pin comes off by id even once its session has ended
+        other = self.second / "sessions" / f"{os.getppid()}.json"
+        write(other, pid=os.getppid(), sessionId=self.S2, status="idle")
+        r = self.run_tool("ps", "--pin", self.S2[:8], CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = json.loads(self.run_tool("ps", "--json", CLAUDE_MOVE_TMUX=tm).stdout)
+        self.assertEqual([(x["sid"], x["pin"]) for x in rows], [(self.S2, True), (self.S1, False)])
+        self.assertIn("📌", self.run_tool("ps", CLAUDE_MOVE_TMUX=tm).stdout)
+        other.unlink()
+        self.assertNotEqual(self.run_tool("ps", "--pin", "nope", CLAUDE_MOVE_TMUX=tm).returncode, 0)
+        self.assertEqual(self.run_tool("ps", "--unpin", self.S2[:8], CLAUDE_MOVE_TMUX=tm).returncode, 0)
+        self.assertEqual(json.loads((self.home / ".config/claude-move/pins.json").read_text(encoding="utf-8")), [])
         # term opens a tmux window when tmux is running
         r = self.run_tool("term", "first", CLAUDE_MOVE_TMUX=tm, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
         self.assertIn("tmux window w:2", r.stdout)
@@ -911,6 +923,9 @@ class Panel(unittest.TestCase):
         live = json.loads(self.call("/api/live")[1])
         self.assertEqual([(x["sid"], x["status"]) for x in live["rows"]], [(self.S2, "idle")])
         self.assertEqual(self.call("/api/live", {"do": "show", "target": "x:1"})[0], 400)
+        self.assertEqual(self.call("/api/live", {"do": "pin", "sid": self.S1, "on": True})[0], 400)  # not running
+        self.assertTrue(json.loads(self.call("/api/live", {"do": "pin", "sid": self.S2, "on": True})[1])["ok"])
+        self.assertTrue(json.loads(self.call("/api/live")[1])["rows"][0]["pin"])
         self.assertEqual(self.call("/api/resume", {"sid": "../../etc"})[0], 400)
         out = json.loads(self.call("/api/resume", {"sid": self.S1})[1])
         self.assertTrue(out["ok"], out)
