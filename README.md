@@ -108,11 +108,11 @@ Labels are stored in `~/.config/claude-move/accounts.json`.
 - **Cooling and reset times.** When an account hits its 5-hour or weekly limit, Claude Code writes the
   official limit message, with the reset time, into the transcript. The panel reads those, so you see
   "weekly limit used up, back at 10-24 10:00" and when each weekly window resets.
-- **Use per account.** Replies in `~/.claude/projects` are summed for the last 5 hours and the current week,
+- **Use per account.** Replies in `~/.claude/projects` and in every signed-in CLI folder (`~/.claude-*`) are summed for the last 5 hours and the current week,
   priced at API list prices. This is only for comparing accounts; it is not your bill and not a percentage
   of your plan. Desktop replies are credited to whoever was signed into the desktop app at that moment
   (the app's own log names the account it is using); CLI replies go to the account of the config folder
-  you pass with `--config`.
+  they ran in, also after the session was copied into `~/.claude` for the app (`--config` adds a folder elsewhere).
 - **Official percentages, from the CLI.** `claude-move usage --refresh` runs the CLI's own `/usage` command once
   for every config folder that is signed in (`~/.claude` and `~/.claude-*`) and shows the same meters as the
   plan's usage page: this 5-hour session, the week, and any per-model weekly meter. `/usage` is a local
@@ -333,7 +333,7 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 
 **额度面板：** `claude-move usage` 把几个号放在一起看，告诉你该换到哪个：
 - 冷却和恢复时间：撞到 5 小时或每周上限时，Claude Code 会把官方提示和恢复时间写进会话记录，面板读的就是它，所以能看到“每周额度用完，10-24 10:00 恢复”，以及每周几点重置。
-- 用量：把 `~/.claude/projects` 里的回复按最近 5 小时和本周加起来，按 API 价折算，只用来比较几个号谁用得多，不是账单，也不是套餐百分比。桌面 App 的回复算给当时登录的那个号（App 自己的日志里记着它在用哪个账号），命令行的回复算给 `--config` 指定的配置目录的账号。
+- 用量：把 `~/.claude/projects` 和每个已登录的命令行目录（`~/.claude-*`）里的回复按最近 5 小时和本周加起来，按 API 价折算，只用来比较几个号谁用得多，不是账单，也不是套餐百分比。桌面 App 的回复算给当时登录的那个号（App 自己的日志里记着它在用哪个账号），命令行的回复算给它当时所在的配置目录的账号，会话被拷进 `~/.claude` 给桌面 App 接着用以后也一样（别处的目录用 `--config` 加）。
 - 官方百分比：`claude-move usage --refresh` 对每个登录过的命令行配置目录（`~/.claude` 和 `~/.claude-*`）各跑一次官方的 `/usage`，拿到和套餐用量页一样的数据：这 5 小时、本周、按模型分的每周额度。`/usage` 是本地命令，不耗额度；claude-move 只是运行命令行，碰不到登录信息。另外 `claude-move watch install` 可以装一个状态栏记录器，命令行每刷新一次状态栏就记一次（你原来的状态栏照常显示）；桌面 App 的 Code 页不运行状态栏脚本。
 
 - 套餐：每个号旁边标出 Pro、Max 5x 或 Max 20x（来自命令行登录缓存的账号资料）。建议换哪个号时按套餐大小算本周剩多少，不只看百分比。

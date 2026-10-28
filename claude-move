@@ -1050,7 +1050,8 @@ def scan(roots):
             known.setdefault(base, found[key][0])  # names sessions run from elsewhere, like a scratch folder
     home = project_dir_name(HOME) + "-"
     recs, hits, dedup = [], [], set()
-    for key, c in files.items():
+    # the desktop's folder last: a CLI session copied there keeps its replies under the CLI login they ran in
+    for key, c in sorted(files.items(), key=lambda kc: kc[1]["root"] == str(DESKTOP_HOME)):
         name, base = found[key]
         proj = name or known.get(base) or (base[len(home):] if base.startswith(home) else base.lstrip("-"))
         for r in c["recs"]:
@@ -1517,7 +1518,9 @@ def usage_report(extra_cfgs=(), now=None):
     now = now or time.time()
     accts = accounts()
     idx = owner_index(accts)
-    roots = [DESKTOP_HOME] + [Path(os.path.expanduser(c)) for c in extra_cfgs]
+    # every CLI login's own folder too: its replies count for its account
+    roots = list(dict.fromkeys([DESKTOP_HOME] + [Path(os.path.expanduser(c)) for c in extra_cfgs]
+                               + [c for c in cli_configs(extra_cfgs) if c != DESKTOP_HOME]))
     fallback = {str(DESKTOP_HOME): None}
     for c in roots[1:]:
         fallback[str(c)] = cli_account(c)
