@@ -983,7 +983,7 @@ class Codex(unittest.TestCase):
                      str(self.proj), used=10.0)
         out = self.run_tool("codex", **self.env).stdout
         self.assertIn("Codex: use codex·dddddddd", out)
-        self.assertIn("CODEX_HOME=~/.codex-work codex", out)
+        self.assertIn("$env:CODEX_HOME=" if WIN else "CODEX_HOME=~/.codex-work codex", out)  # as typed in that shell
 
     def test_search_resume_and_login(self):
         self.prepare()
