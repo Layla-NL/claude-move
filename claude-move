@@ -541,6 +541,26 @@ T = {
     "gr_busy": ("  {w}: busy, left as it is; switch again once it is idle", "  {w}：正在忙，没动；等它空了再换一次"),
     "gr_notmux": ("  {w}: not in tmux, left as it is; quit it, then: {c}", "  {w}：不在 tmux 里，没动；退出它以后：{c}"),
     "gr_would": ("  {w}: would quit and resume on {a}", "  {w}：会退出，再到 {a} 上接着做"),
+    "cx_term_tip": ("Open Codex with this login", "用这个登录打开 Codex"),
+    "cx_title": ("Codex accounts: official % from the rate limits Codex writes in its own session files",
+                 "Codex 账号：官方百分比取自 Codex 自己写在会话记录里的额度"),
+    "cx_empty": ("No Codex sessions on this computer yet (~/.codex, ~/.codex-*).", "这台电脑上还没有 Codex 会话（~/.codex、~/.codex-*）。"),
+    "cx_noff": ("no official % yet", "还没有官方数据"),
+    "cx_credits": ("{n} credits", "{n} credits"),
+    "cx_last": ("used {a} ago", "{a}前用过"),
+    "cx_pick": ("-> Codex: use {a} (not cooling, most left this week)", "→ Codex 建议用：{a}（没在冷却，本周剩得最多）"),
+    "cx_notes": ("Name one: claude-move name <id> <label> · a terminal on it: claude-move codex term <account> · another login: claude-move codex login <name>",
+                 "起名：claude-move name <id> <名字> · 用它开终端：claude-move codex term <账号> · 加一个登录：claude-move codex login <名字>"),
+    "cx_none": ("No Codex folder for \"{t}\". Sign one in: claude-move codex login <name>.", "找不到“{t}”的 Codex 文件夹。新登录一个：claude-move codex login <名字>。"),
+    "cx_open": ("Opened Codex as {a} in {d} ({w}): {c}", "已用 {a} 在 {d} 打开 Codex（{w}）：{c}"),
+    "cx_login_name": ("Give the login a short name (letters, digits, - or _), e.g. claude-move codex login work",
+                      "给这个登录起个短名字（字母、数字、- 或 _），比如 claude-move codex login work"),
+    "cx_login_open": ("Opened codex login for {d} ({w}). Sign in there in your browser; then claude-move codex shows it, and claude-move codex term {n} opens it.",
+                      "已为 {d} 打开 codex login（{w}）。在浏览器里登录；之后 claude-move codex 就能看到它，claude-move codex term {n} 用它开终端。"),
+    "cx_login_after": ("Signed in? claude-move codex term {n} opens Codex with this login.", "登好了？claude-move codex term {n} 用这个登录打开 Codex。"),
+    "rs_codex_to": ("Codex sessions stay with their account; resume it without --to.", "Codex 会话留在原来的号上，不带 --to 接着做。"),
+    "gr_codex": ("  {w}: a Codex session, left with its account (Codex sessions are not moved)",
+                 "  {w}：是 Codex 会话，留在原来的号上（Codex 会话不搬）"),
     "gr_empty": ("  {w}: nothing said in it yet, left as it is", "  {w}：还没聊过，没动"),
     "gr_stuck": ("  {w}: did not quit within 20 s, left as it is", "  {w}：20 秒内没退出，没动"),
     "gr_moved": ("  {w}: resumed on {a}", "  {w}：已到 {a} 上接着做"),
@@ -787,11 +807,18 @@ def cmd_sessions(args):
 
 
 def cmd_name(args):
-    a = pick(args.account, accounts())
-    nm = names()
-    nm[a["acct"]] = args.label
+    tok, nm = args.account.strip(), names()
+    desk = accounts()
+    if any(nm.get(a["acct"]) == tok or a["acct"].startswith(tok) for a in desk) or not tok:
+        acct = pick(tok, desk)["acct"]
+    else:  # an account with only a CLI login, or a Codex one
+        known = [cli_account(c) for c in cli_configs()] + list(codex_accounts())
+        acct = next((a for a in known if a and (nm.get(a) == tok or a.startswith(tok))), None)
+        if not acct:
+            sys.exit(t("not_found", t=tok))
+    nm[acct] = args.label
     save_names(nm)
-    print(t("named", a=a["acct"][:8], n=args.label))
+    print(t("named", a=acct[:8], n=args.label))
 
 
 def matches(d, only):
@@ -1781,10 +1808,13 @@ def cmd_usage(args):
         print()
     print(t("u_scan"), file=sys.stderr)
     rep = usage_report(args.config or ())
+    cx = codex_rows()
     if args.json:  # for the Claude Code mod: official numbers and use per account, nothing else happens
         keys = ("acct", "name", "plan", "cool", "week_usd", "five_usd", "week_reset", "official")
         print(json.dumps({"now": rep["now"], "pick": (rep["pick"] or {}).get("name"),
-                          "rows": [{k: r[k] for k in keys} for r in rep["rows"]],
+                          "rows": [dict({k: r[k] for k in keys}, tool="claude") for r in rep["rows"]]
+                          + [dict({k: r.get(k, 0) for k in keys}, tool="codex", credits=r["credits"]) for r in cx],
+                          "codex_pick": (codex_pick(cx) or {}).get("name") if len(cx) > 1 else None,
                           "unmapped_usd": round(rep["unmapped_usd"], 2)}, ensure_ascii=False))
         return
     maybe_week_summary(rep)
@@ -1797,6 +1827,12 @@ def cmd_usage(args):
         print(t("u_pick", a=rep["pick"]["name"]))
     elif rep["first_back"]:
         print(t("u_pick_none", a=rep["first_back"]["name"], w=clock(rep["first_back"]["cool"]["until"])))
+    if cx:
+        print("\n" + t("cx_title"))
+        for r in cx:
+            print(f"{r['name']:14} {r['plan'] or '-':9} {codex_line(r)}")
+        if len(cx) > 1 and codex_pick(cx):
+            print(t("cx_pick", a=codex_pick(cx)["name"]))
     print(t("u_notes"))
     if args.html:
         out = CONF / "usage.html"
@@ -1919,14 +1955,23 @@ def card_html(r, rep, live):
         f'data-reset="{E(short_clock(x["resets_at"], now)) if x.get("resets_at") else ""}" '
         f'aria-pressed="{"true" if i == sel else "false"}" data-tip="{tip(t("u_pct", k=row_label(x), p=round(x.get("percent") or 0)) + (chr(10) + t("pp_resets", w=clock(x["resets_at"])) if x.get("resets_at") else ""))}">'
         f'{E(row_label(x))} {round(x.get("percent") or 0)}%</button>' for i, x in enumerate(rows))
-    days = [time.strftime("%m-%d", time.localtime(now - i * 86400)) for i in range(6, -1, -1)]
-    peak = max(r["daily"] + [0.01])
+    codex = r.get("tool") == "codex"
+    peak = max(r.get("daily", []) + [0.01])
     week_label = t("u_week") if r["week_reset"] else t("u_7d")
-    spend = (f'<div class="spend" data-tip="{tip(t("u_spent", k=week_label, d=r["week_usd"]) + chr(10) + t("u_spent", k=t("u_5h"), d=r["five_usd"]))}">'
-             f'<div class="bars">' + "".join(f'<i style="height:{max(8, 100 * v / peak):.0f}%"></i>' for v in r["daily"]) +
-             f'</div>${r["week_usd"]:,.0f}</div>')
+    if codex:  # Codex reports no spend; its credits, when it has any
+        n = f'{r["credits"]:,.0f}' if r["credits"] is not None else ""
+        spend = f'<div class="spend" data-tip="{tip(t("cx_credits", n=n))}">{n}</div>' if n else ""
+    else:
+        spend = (f'<div class="spend" data-tip="{tip(t("u_spent", k=week_label, d=r["week_usd"]) + chr(10) + t("u_spent", k=t("u_5h"), d=r["five_usd"]))}">'
+                 f'<div class="bars">' + "".join(f'<i style="height:{max(8, 100 * v / peak):.0f}%"></i>' for v in r["daily"]) +
+                 f'</div>${r["week_usd"]:,.0f}</div>')
     acts = ""
-    if live:
+    if live and codex:
+        a = E(r["acct"])
+        acts = (f'<button class="ib" type="button" data-term="{a}" data-codex="1" data-tip="{tip(t("cx_term_tip"))}">{icon("term")}</button>'
+                f'<button class="ib" type="button" data-copy="{E(r["cli"])}" data-tip="{tip(t("p_copy"))}">{icon("copy")}</button>'
+                f'<button class="ib" type="button" data-rename="{a}" data-tip="{tip(t("pt_rename"))}">{icon("pen")}</button>')
+    elif live:
         a = E(r["acct"])
         if r["cli"]:
             on = bool(r["cfg"]) and recorder_on(Path(r["cfg"]))
@@ -1939,7 +1984,7 @@ def card_html(r, rep, live):
         else:
             acts += f'<button class="ib" type="button" data-login="{a}" data-tip="{tip(t("pt_login"))}">{icon("adduser")}</button>'
         acts += f'<button class="ib" type="button" data-rename="{a}" data-tip="{tip(t("pt_rename"))}">{icon("pen")}</button>'
-    plan = E(r["plan"]) if r["plan"] else "&nbsp;"
+    plan = E(" · ".join(x for x in ("Codex" if codex else "", r["plan"]) if x)) or "&nbsp;"
     crew = f'<span class="crewmark" data-tip="{tip(t("pp_crew"))}">{icon("anchor")}</span>' if live and r["acct"] == crew_acct() else ""
     return (f'<article class="card" {attrs} data-heat="{heat}"><div class="sky"><canvas class="orb" aria-hidden="true"></canvas>'
             f'<div class="head"><div><div class="name">{E(r["name"])}<span class="deskmark" hidden data-tip="{tip(t("pp_desk"))}">{icon("desk")}</span>{crew}</div>'
@@ -1953,6 +1998,8 @@ def render_html(rep, live=None):
     from html import escape as E
     now = rep["now"]
     cards = [card_html(r, rep, live) for r in rep["rows"]]
+    if not any(r["acct"].startswith("demo-") for r in rep["rows"]):
+        cards += [card_html(r, rep, live) for r in rep.get("codex") or codex_rows()]
     if rep["unmapped_usd"] >= 1:
         cards.append(f'<article class="card" data-acct="" data-name="{E(t("u_cli_head"))}" data-heat=""><div class="sky">'
                      f'<canvas class="orb" aria-hidden="true"></canvas><div class="head"><div><div class="name">{E(t("u_cli_head"))}</div>'
@@ -2089,7 +2136,7 @@ byId("refresh").onclick = async () => {{
 document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () =>
   navigator.clipboard.writeText(b.dataset.copy).then(() => flash(b, T.p_copied)));
 document.querySelectorAll("[data-term]").forEach(b => b.onclick = async () => {{
-  const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc, auto: pressed("auto")}});
+  const r = await api("/terminal", {{acct: b.dataset.term, rc: !!b.dataset.rc, auto: pressed("auto"), codex: !!b.dataset.codex}});
   if (r.ok) flash(b, T.p_term_done); else showLog(r.log);
 }});
 const setPressed = (id, on) => byId(id).setAttribute("aria-pressed", on ? "true" : "false");
@@ -2885,6 +2932,12 @@ def cmd_panel(args):
                 return self.send(200, json.dumps({"ok": ok, "log": log}, ensure_ascii=False))
             if path == "/terminal":  # only an account's own signed-in config folder, only to run `claude`
                 acct = str(body.get("acct") or "")
+                if body.get("codex"):  # a Codex account's own folder, only to run `codex`
+                    e = codex_accounts().get(acct)
+                    if not e:
+                        return self.send(404, json.dumps({"ok": False, "log": t("cx_none", t=acct[:8])}, ensure_ascii=False))
+                    open_codex(e["home"], e["cwd"], codex_name(acct))
+                    return self.send(200, json.dumps({"ok": True, "log": ""}))
                 cfg = next((c for c in cli_configs(args.config or ()) if acct and cli_account(c) == acct), None)
                 if not cfg:
                     return self.send(404, json.dumps({"ok": False, "log": t("t_none", t=acct[:8])}, ensure_ascii=False))
@@ -4167,7 +4220,7 @@ def notify(title, body):
         pass
 
 
-def check_levels(acct, rows):
+def check_levels(acct, rows, who=None):
     """Notify once per reset window when an official meter passes each level (75/90/95% by default)."""
     conf = notify_conf()
     if not conf["on"] or not acct:
@@ -4186,7 +4239,7 @@ def check_levels(acct, rows):
             old = {"reset": reset, "level": 0}
         hit = max((lv for lv in conf["levels"] if p >= lv), default=0)
         if hit > old.get("level", 0):
-            msg = t("n_level", a=names().get(acct, acct[:8]), k=row_label(r), p=f"{p:.0f}")
+            msg = t("n_level", a=who or names().get(acct, acct[:8]), k=row_label(r), p=f"{p:.0f}")
             msg += " · " + t("n_reset", w=clock(reset)) if reset else ""
             hint = switch_hint(acct) if hit >= 90 and acct == crew_acct() else ""
             notify(t("n_title"), msg + ("\n" + hint if hint else ""))
@@ -4929,7 +4982,7 @@ def cmd_run(args):
 
 # ---------- terminal sessions: search every CLI login's transcripts, the running ones, tmux
 INDEX = Path(os.environ.get("CLAUDE_MOVE_INDEX") or str(HOME / ".cache/claude-move/search.db"))
-INDEX_VERSION = 1
+INDEX_VERSION = 2  # 2: Codex sessions too, with the account each was made under
 WANTED = re.compile(rb'"type": ?"(?:user|assistant|custom-title|ai-title)"')
 TMUX_CONF = HOME / ".tmux.conf"
 TMUX_MARK = ("# >>> claude-move", "# <<< claude-move")
@@ -5025,7 +5078,7 @@ def index_db():
         if db.execute("PRAGMA user_version").fetchone()[0] != INDEX_VERSION:  # nobody else made it meanwhile
             for sql in ("DROP TABLE IF EXISTS files", "DROP TABLE IF EXISTS msgs",
                         "CREATE TABLE files(path TEXT PRIMARY KEY, cfg TEXT, sid TEXT, cwd TEXT, title TEXT, ai TEXT, "
-                        "first TEXT, off INTEGER, ino INTEGER, mtime REAL)",
+                        "first TEXT, off INTEGER, ino INTEGER, mtime REAL, acct TEXT)",
                         "CREATE TABLE msgs(path TEXT, ts REAL, role TEXT, text TEXT)", "CREATE INDEX msgs_path ON msgs(path)",
                         f"PRAGMA user_version = {INDEX_VERSION}"):
                 db.execute(sql)
@@ -5065,8 +5118,41 @@ def index_file(db, cfg, f, st, row):
                     first = first or (" ".join(text.split())[:80] if kind == "user" else None)
                     rows.append((p, iso_ts(rec.get("timestamp")) or 0, kind, text))
     db.executemany("INSERT INTO msgs VALUES (?,?,?,?)", rows)
-    db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?)",
-               (p, str(cfg), f.stem, cwd, title, ai, first, off, st.st_ino, st.st_mtime))
+    db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+               (p, str(cfg), f.stem, cwd, title, ai, first, off, st.st_ino, st.st_mtime, None))
+
+
+def codex_index_file(db, home, f, st, row, titles):
+    """index_file for a Codex session: its messages from where the index stopped, its account and folder from its
+    opening record, its name from Codex's session index."""
+    p = str(f)
+    off = row[1] if row and row[2] == st.st_ino and st.st_size >= row[1] else 0
+    if row and not off:
+        db.execute("DELETE FROM msgs WHERE path=?", (p,))
+    first = row[6] if row and off else None
+    meta = codex_meta(f)
+    rows = []
+    with open(f, "rb") as fh:
+        fh.seek(off)
+        for raw in fh:
+            if not raw.endswith(b"\n"):
+                break
+            off += len(raw)
+            if b'"response_item"' not in raw:
+                continue
+            try:
+                rec = json.loads(raw)
+            except ValueError:
+                continue
+            role, text = codex_said(rec) if isinstance(rec, dict) else (None, "")
+            if text:
+                first = first or (" ".join(text.split())[:80] if role == "user" else None)
+                rows.append((p, iso_ts(rec.get("timestamp")) or 0, role, text))
+    sid = codex_sid(f)
+    db.executemany("INSERT INTO msgs VALUES (?,?,?,?)", rows)
+    db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+               (p, str(home), sid, meta.get("cwd"), None, titles.get(sid), first, off, st.st_ino, st.st_mtime,
+                meta.get("creator_account_id")))
 
 
 def index_update(db, extra=()):
@@ -5084,24 +5170,30 @@ def index_update(db, extra=()):
     if not lock():
         return
     seen, done = set(), 0
-    for cfg in cli_configs(extra):
-        for f in cfg.glob("projects/*/*.jsonl"):
+    todo = [(cfg, f, None) for cfg in cli_configs(extra) for f in cfg.glob("projects/*/*.jsonl")]
+    for home in codex_homes():
+        titles = codex_titles(home)
+        todo += [(home, f, titles) for f in codex_rollouts(home, archived=True)]
+    for cfg, f, titles in todo:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        seen.add(str(f))
+        row = db.execute("SELECT path, off, ino, cwd, title, ai, first FROM files WHERE path=?", (str(f),)).fetchone()
+        if not row or row[1] != st.st_size or row[2] != st.st_ino:
             try:
-                st = f.stat()
+                if titles is None:
+                    index_file(db, cfg, f, st, row)
+                else:
+                    codex_index_file(db, cfg, f, st, row, titles)
             except OSError:
                 continue
-            seen.add(str(f))
-            row = db.execute("SELECT path, off, ino, cwd, title, ai, first FROM files WHERE path=?", (str(f),)).fetchone()
-            if not row or row[1] != st.st_size or row[2] != st.st_ino:
-                try:
-                    index_file(db, cfg, f, st, row)
-                except OSError:
-                    continue
-                done += 1
-                if done % 10 == 0:
-                    db.commit()
-                    if not lock():
-                        return
+            done += 1
+            if done % 10 == 0:
+                db.commit()
+                if not lock():
+                    return
     for (p,) in db.execute("SELECT path FROM files").fetchall():
         if p not in seen:
             db.execute("DELETE FROM msgs WHERE path=?", (p,))
@@ -5131,28 +5223,29 @@ def find_sessions(words, extra=(), limit=20, acct=None, live=None):
             s = {r[0] for r in db.execute("SELECT DISTINCT path FROM msgs WHERE text LIKE ? ESCAPE '\\'", (p,))}
             s |= {r[0] for r in db.execute("SELECT path FROM files WHERE title LIKE ? ESCAPE '\\' OR ai LIKE ? ESCAPE '\\'", (p, p))}
             hit = s if hit is None else hit & s
-        files = [db.execute("SELECT path, cfg, sid, cwd, title, ai, first, mtime FROM files WHERE path=?", (p,)).fetchone()
+        files = [db.execute("SELECT path, cfg, sid, cwd, title, ai, first, mtime, acct FROM files WHERE path=?", (p,)).fetchone()
                  for p in hit or ()]
         files.sort(key=lambda r: r[7], reverse=True)
         nm, who, by_sid, lb = names(), {}, {}, labels()
-        for path, cfg, sid, cwd, title, ai, first, mtime in files:
-            if cfg not in who:
-                a = cli_account(Path(cfg)) or ""
-                who[cfg] = (a, nm.get(a, a[:8]))
-            if acct and who[cfg][0] != acct:
+        for path, cfg, sid, cwd, title, ai, first, mtime, made_by in files:
+            key = made_by or cfg  # a Codex session names its own account; a Claude one is its folder's
+            if key not in who:
+                a = made_by or cli_account(Path(cfg)) or ""
+                who[key] = (a, codex_name(a) if made_by else nm.get(a, a[:8]))
+            if acct and who[key][0] != acct:
                 continue
             if sid in by_sid:
-                if who[cfg][1] not in by_sid[sid]["also"] and who[cfg][1] != by_sid[sid]["name"]:
-                    by_sid[sid]["also"].append(who[cfg][1])
+                if who[key][1] not in by_sid[sid]["also"] and who[key][1] != by_sid[sid]["name"]:
+                    by_sid[sid]["also"].append(who[key][1])
                 continue
             if len(by_sid) >= limit:
                 continue
             m = db.execute("SELECT ts, role, text FROM msgs WHERE path=? AND text LIKE ? ESCAPE '\\' ORDER BY ts DESC LIMIT 1",
                            (path, like[0])).fetchone()
-            by_sid[sid] = {"sid": sid, "acct": who[cfg][0], "name": who[cfg][1], "cfg": cfg, "cwd": cwd or "",
+            by_sid[sid] = {"sid": sid, "acct": who[key][0], "name": who[key][1], "cfg": cfg, "cwd": cwd or "",
                            "project": short(Path(cwd)) if cwd else "", "title": lb.get(sid) or title or ai or first or t("untitled"),
                            "last": int(mtime * 1000), "said": m[1] if m else "", "snippet": snippet(m[2], words[0]) if m else "",
-                           "also": [], "live": ""}
+                           "also": [], "live": "", "tool": "codex" if made_by else "claude"}
     finally:
         db.close()
     running = {r["sid"]: r for r in (live_sessions(extra) if live is None else live)}
@@ -5165,11 +5258,13 @@ def find_sessions(words, extra=(), limit=20, acct=None, live=None):
 def resume_text(cfg, cwd, sid):
     """The command that resumes a session by hand: its folder, its login."""
     from shlex import quote
+    cmd = (codex_command(Path(cfg)) + f" resume {sid}" if Path(cfg).name.startswith(".codex")
+           else env_cmd(Path(cfg), f"claude --resume {sid}"))
     if WIN:
-        return f"cd {ps_quote(cwd)}; " + env_cmd(Path(cfg), f"claude --resume {sid}")
+        return f"cd {ps_quote(cwd)}; " + cmd
     shown = short(Path(cwd))
     shown = "~/" + quote(shown[2:]) if shown.startswith("~/") else quote(shown)
-    return f"cd {shown} && " + env_cmd(Path(cfg), f"claude --resume {sid}")
+    return f"cd {shown} && " + cmd
 
 
 def index_quietly(extra=()):
@@ -5186,9 +5281,12 @@ def index_quietly(extra=()):
 def cmd_find(args):
     words = [w for w in " ".join(args.words).split() if w]
     cfg = cli_dir(args.account.strip(), args.config or ()) if args.account else None
+    acct = cli_account(cfg) if cfg else None
     if args.account and not cfg:
-        sys.exit(t("t_none", t=args.account))
-    rows = find_sessions(words, args.config or (), args.limit, cli_account(cfg) if cfg else None)
+        acct = next((a for a in codex_accounts() if names().get(a) == args.account.strip() or a.startswith(args.account.strip())), None)
+        if not acct:
+            sys.exit(t("t_none", t=args.account))
+    rows = find_sessions(words, args.config or (), args.limit, acct)
     if args.json:
         print(json.dumps(rows, ensure_ascii=False))
         return
@@ -5218,7 +5316,14 @@ def find_transcript(token, extra=()):
                 hits.append((f.stat().st_mtime, cfg, f))
             except OSError:
                 pass
-    sids = sorted({f.stem for _, _, f in hits})
+    for home in codex_homes():
+        for f in list(home.glob(f"sessions/*/*/*/rollout-*-{token}*.jsonl")) + list(home.glob(f"archived_sessions/**/rollout-*-{token}*.jsonl")):
+            if codex_sid(f).startswith(token):
+                try:
+                    hits.append((f.stat().st_mtime, home, f))
+                except OSError:
+                    pass
+    sids = sorted({codex_sid(f) if f.name.startswith("rollout-") else f.stem for _, _, f in hits})
     if not sids:
         return None, t("rs_none", i=token)
     if len(sids) > 1:
@@ -5228,6 +5333,8 @@ def find_transcript(token, extra=()):
 
 
 def transcript_cwd(f):
+    if Path(f).name.startswith("rollout-"):  # Codex: its opening record says
+        return codex_meta(f).get("cwd")
     try:
         with open(f, encoding="utf-8", errors="replace") as fh:
             for _, line in zip(range(200), fh):
@@ -5244,8 +5351,12 @@ def transcript_cwd(f):
 
 def resume_session(cfg, f, to_cfg=None, here=False, extra=()):
     """Resume a terminal session in a new tmux window (or terminal window), in its own folder, with its login or,
-    with to_cfg, another one it is first copied to. Never two claudes on one transcript."""
-    sid = f.stem
+    with to_cfg, another one it is first copied to. Never two claudes on one transcript. A Codex session resumes
+    with codex in its own folder (CODEX_HOME); it is not copied to another."""
+    codex = f.name.startswith("rollout-")
+    sid = codex_sid(f) if codex else f.stem
+    if codex and to_cfg and Path(to_cfg).resolve() != Path(cfg).resolve():
+        return False, t("rs_codex_to")
     live = {r["sid"]: r for r in live_sessions(extra)}.get(sid)
     if live:
         return False, t("rs_live", w=live["tmux"] or f'pid {live["pid"]}', i=sid[:8])
@@ -5253,6 +5364,19 @@ def resume_session(cfg, f, to_cfg=None, here=False, extra=()):
     if not cwd or not Path(cwd).is_dir():
         return False, t("rs_nocwd", d=cwd or "?")
     lines = []
+    if codex:
+        argv, env = [codex_exe(), "resume", sid], codex_env(Path(cfg))
+        meta = codex_meta(f)
+        who, title = codex_name(str(meta.get("creator_account_id") or "")), codex_titles(Path(cfg)).get(sid) or codex_first(f) or sid[:8]
+        if here:
+            e = {k: v for k, v in os.environ.items() if k != "CODEX_HOME"}
+            e.update({k: v for k, v in env.items() if v is not None})
+            os.chdir(cwd)
+            if WIN:
+                sys.exit(subprocess.call(argv, env=e))
+            os.execvpe(argv[0], argv, e)
+        win = open_window(term_script(f"resume-{sid[:8]}", cwd, env, argv), f"{who}·{title[:16]}")
+        return True, t("rs_open", s=title, a=who, w=f"tmux {win}" if win else t("rs_term"))
     if to_cfg and Path(to_cfg).resolve() != Path(cfg).resolve():
         bk = copy_session(cfg, to_cfg, sid)
         if bk is False:
@@ -5387,15 +5511,312 @@ def live_sessions(extra=()):
             # name firstmate gave, then Claude Code's
             title = lb.get(sid) or (d.get("nameSource") == "user" and d.get("name")) or given or window or ai or d.get(
                 "name") or (first_prompt(tr) if tr else "")
-            out.append({"pid": pid, "sid": sid, "acct": acct, "name": nm.get(acct, acct[:8]), "cfg": str(cfg),
+            out.append({"pid": pid, "sid": sid, "acct": acct, "name": nm.get(acct, acct[:8]), "cfg": str(cfg), "tool": "claude",
                         "title": str(title), "status": str(d.get("status") or ""),
                         "cwd": cwd, "project": short(Path(cwd)) if cwd else "", "started": (d.get("startedAt") or 0) / 1000,
                         "active": max(last, (d.get("updatedAt") or 0) / 1000), "rc": bool(d.get("bridgeSessionId")),
                         "tmux": target, "window": window, "pin": sid in pin, "group": member.get(sid, "")})
+    titles_of = {}
+    for pid, (f, cwd) in codex_live(extra).items():
+        if pid in seen:
+            continue
+        seen.add(pid)
+        meta, tail = codex_meta(f), codex_tail(f, 65536)
+        home = f.parents[4]  # <home>/sessions/YYYY/MM/DD/rollout-*.jsonl
+        acct, sid = str(meta.get("creator_account_id") or ""), str(meta.get("id") or codex_sid(f))
+        if home not in titles_of:
+            titles_of[home] = codex_titles(home)
+        up, hops = pid, 0
+        while up and up not in panes and hops < 40:
+            up, hops = pp.get(up), hops + 1
+        target, window = panes.get(up, ("", ""))
+        cwd = cwd or str(meta.get("cwd") or "")
+        try:
+            last = f.stat().st_mtime
+        except OSError:
+            last = 0
+        out.append({"pid": pid, "sid": sid, "acct": acct, "name": codex_name(acct) if acct else "codex", "cfg": str(home),
+                    "tool": "codex", "title": lb.get(sid) or window or titles_of[home].get(sid) or codex_first(f),
+                    "status": "busy" if codex_busy(tail) else "idle", "cwd": cwd,
+                    "project": short(Path(cwd)) if cwd else "", "started": iso_ts(meta.get("timestamp")) or 0, "active": last,
+                    "rc": False, "tmux": target, "window": window, "pin": sid in pin, "group": member.get(sid, "")})
     order = {sid: i for i, sid in enumerate(pin)}  # pinned ones keep the order they were pinned in
     gi = {g["name"]: i for i, g in enumerate(gs)}  # then each group together, in the order they were made
     return sorted(out, key=lambda r: (not r["pin"], order.get(r["sid"], 0), gi.get(r["group"], len(gs)),
                                       r["status"] != "busy", -r["active"]))
+
+
+# ---------- Codex: its logins, official numbers and sessions. Codex keeps no per-account session list, so nothing
+# is moved; every Codex folder (CODEX_HOME) is read for what it says, and its auth.json is never opened.
+CODEX_RECENT = 60  # the newest session files per folder that are read for accounts and numbers
+
+
+def codex_homes(extra=()):
+    """Codex folders in use: ~/.codex, ~/.codex-* (another login through CODEX_HOME), then any passed in."""
+    found = [HOME / ".codex"] + sorted(p for p in HOME.glob(".codex-*") if p.is_dir())
+    found += [Path(os.path.expanduser(x)) for x in extra]
+    return [h for h in dict.fromkeys(found) if (h / "sessions").is_dir() or (h / "auth.json").exists()]
+
+
+def codex_rollouts(home, archived=False):
+    """A Codex folder's session files, newest first."""
+    out = []
+    for f in list((home / "sessions").glob("*/*/*/rollout-*.jsonl")) + (
+            list((home / "archived_sessions").glob("**/rollout-*.jsonl")) if archived else []):
+        try:
+            out.append((f.stat().st_mtime, f))
+        except OSError:
+            continue
+    return [f for _, f in sorted(out, reverse=True)]
+
+
+def codex_sid(f):
+    """A session file's id: the uuid that ends its name (rollout-<time>-<uuid>.jsonl)."""
+    return Path(f).stem[-36:]
+
+
+def codex_meta(f):
+    """A session file's opening record (session_meta): its id, folder, account (creator_account_id) and origin."""
+    try:
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            for _ in range(5):
+                line = fh.readline()
+                if '"session_meta"' in line:
+                    p = json.loads(line).get("payload")
+                    return p if isinstance(p, dict) else {}
+                if not line:
+                    break
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def codex_tail(f, size=262144):
+    """The last records of a session file: Codex writes the official numbers and turn starts and ends as it goes."""
+    try:
+        with open(f, "rb") as fh:
+            fh.seek(0, 2)
+            n = fh.tell()
+            fh.seek(max(0, n - size))
+            data = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    out = []
+    for line in data.splitlines()[1 if n > size else 0:]:  # the first may be cut
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            out.append(d)
+    return out
+
+
+def codex_limits(recs):
+    """The newest official numbers in a session's records (token_count's rate_limits), as {at, rows, plan, credits}."""
+    for d in reversed(recs):
+        p = d.get("payload")
+        rl = p.get("rate_limits") if isinstance(p, dict) and p.get("type") == "token_count" else None
+        if not isinstance(rl, dict):
+            continue
+        rows = []
+        for w in (rl.get("primary"), rl.get("secondary")):
+            if isinstance(w, dict) and isinstance(w.get("used_percent"), (int, float)):
+                mins = w.get("window_minutes") or 0
+                rows.append({"kind": "session" if mins and mins <= 1440 else "weekly_all", "percent": w["used_percent"],
+                             "resets_at": w.get("resets_at"), "minutes": mins})
+        cr = rl.get("credits") if isinstance(rl.get("credits"), dict) else {}
+        try:
+            credits = None if cr.get("unlimited") or not cr.get("has_credits") else float(cr.get("balance"))
+        except (TypeError, ValueError):
+            credits = None
+        return {"at": iso_ts(d.get("timestamp")) or 0, "rows": sorted(rows, key=lambda r: ROW_ORDER.get(r["kind"], 9)),
+                "plan": str(rl.get("plan_type") or ""), "credits": credits}
+    return None
+
+
+def codex_busy(recs):
+    """Whether a turn is running: the newest turn start or end in the records."""
+    for d in reversed(recs):
+        p = d.get("payload")
+        k = p.get("type") if isinstance(p, dict) and d.get("type") == "event_msg" else None
+        if k == "task_started":
+            return True
+        if k in ("task_complete", "turn_aborted"):
+            return False
+    return False
+
+
+def codex_name(acct):
+    return names().get(acct) or "codex·" + acct[:8]
+
+
+CODEX_PLANS = {"free": "Free", "plus": "Plus", "pro": "Pro", "prolite": "Pro Lite", "team": "Team", "business": "Business",
+               "enterprise": "Enterprise", "edu": "Edu"}
+
+
+def codex_accounts(extra=()):
+    """Each Codex account its folders' sessions were made under, by the account id in those sessions: the folder it
+    was used in last, when, its plan and the newest official numbers it was given."""
+    out = {}
+    for home in codex_homes(extra):
+        for f in codex_rollouts(home)[:CODEX_RECENT]:
+            a = codex_meta(f).get("creator_account_id")
+            if not isinstance(a, str) or not a:
+                continue
+            try:
+                mt = f.stat().st_mtime
+            except OSError:
+                continue
+            e = out.get(a)
+            if not e:
+                e = out[a] = {"acct": a, "home": home, "last": mt, "lim": None, "cwd": codex_meta(f).get("cwd") or ""}
+            elif mt > e["last"]:
+                e.update(home=home, last=mt, cwd=codex_meta(f).get("cwd") or "")
+            if e["lim"] is None:
+                e["lim"] = codex_limits(codex_tail(f))
+    return out
+
+
+def codex_rows(extra=(), now=None):
+    """The Codex accounts as usage rows: official numbers only (its windows that have not reset yet), plan, folder."""
+    now = now or time.time()
+    rows = []
+    for a, e in codex_accounts(extra).items():
+        lim = e["lim"] or {}
+        off = [r for r in lim.get("rows") or [] if (r.get("resets_at") or 0) > now]
+        full = [r for r in off if (r.get("percent") or 0) >= 100]
+        cool = max(full, key=lambda r: r["resets_at"]) if full else None
+        wk = next((r for r in off if r["kind"] == "weekly_all"), None)
+        if off and now - (lim.get("at") or 0) < 3600:
+            check_levels(a, off, who=codex_name(a))
+        rows.append({"acct": a, "name": codex_name(a), "tool": "codex", "plan": CODEX_PLANS.get(lim.get("plan"), lim.get("plan") or ""),
+                     "home": str(e["home"]), "cli": codex_command(e["home"]), "cwd": e["cwd"], "credits": lim.get("credits"),
+                     "cool": {"kind": "five_hour" if cool["kind"] == "session" else "seven_day", "until": cool["resets_at"]} if cool else None,
+                     "week_reset": wk["resets_at"] if wk else 0, "official": {"at": lim["at"], "rows": off} if off else None,
+                     "last": e["last"]})
+    rows.sort(key=lambda r: r["last"], reverse=True)
+    return rows
+
+
+def codex_pick(rows):
+    """The Codex account with the most of its week left, among those not cooling."""
+    left = lambda r: next((x["percent"] for x in (r["official"] or {}).get("rows", []) if x["kind"] == "weekly_all"), None)
+    free = [r for r in rows if not r["cool"]]
+    return min(free, key=lambda r: (left(r) is None, left(r) or 0)) if free else None
+
+
+def codex_command(home):
+    """codex with this folder, as typed into the user's shell."""
+    if home == HOME / ".codex":
+        return "codex"
+    if WIN:
+        return f"$env:CODEX_HOME={ps_quote(home)}; codex"
+    return f"CODEX_HOME={short(home)} codex"
+
+
+def codex_env(home):
+    return {"CODEX_HOME": None if home == HOME / ".codex" else str(home)}
+
+
+def codex_exe():
+    return os.environ.get("CLAUDE_MOVE_CODEX") or shutil.which("codex") or "codex"
+
+
+def codex_home_of(token, extra=()):
+    """A Codex folder by account label or id prefix, or by the folder's own name (~/.codex-<name>)."""
+    token = token.strip()
+    nm = names()
+    for a, e in codex_accounts(extra).items():
+        if token and (nm.get(a) == token or a.startswith(token)):
+            return e["home"]
+    for h in codex_homes(extra):
+        if token in (h.name, h.name[len(".codex-"):]):
+            return h
+    return None
+
+
+def codex_titles(home):
+    """session id -> the name Codex gave it, from its session_index.jsonl."""
+    out = {}
+    try:
+        with open(home / "session_index.jsonl", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("id") and d.get("thread_name"):
+                    out[d["id"]] = str(d["thread_name"])
+    except OSError:
+        pass
+    return out
+
+
+def codex_said(rec):
+    """The words of one user or assistant message in a Codex session; none for its own injected context."""
+    p = rec.get("payload") if rec.get("type") == "response_item" else None
+    if not isinstance(p, dict) or p.get("type") != "message" or p.get("role") not in ("user", "assistant"):
+        return None, ""
+    parts = []
+    for c in p.get("content") or []:
+        x = c.get("text") if isinstance(c, dict) and c.get("type") in ("input_text", "output_text") else None
+        if isinstance(x, str) and x.strip() and not x.lstrip().startswith(("<", "# AGENTS.md instructions")):
+            parts.append(x)
+    return p["role"], "\n".join(parts)
+
+
+def codex_first(f):
+    """A Codex session's first prompt, for a name when it has none."""
+    try:
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            for i, line in enumerate(fh):
+                if i > 200:
+                    break
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                role, text = codex_said(rec) if isinstance(rec, dict) else (None, "")
+                if role == "user" and text:
+                    return " ".join(text.split())[:60]
+    except OSError:
+        pass
+    return ""
+
+
+def codex_live(extra=()):
+    """Codex processes running now and the session file each holds open (macOS and Linux, through lsof): pid ->
+    (session file, folder it runs in). Windows has no lsof, so nothing there."""
+    if WIN:
+        return {}
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,comm="], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    pids = [ln.split(None, 1)[0] for ln in out.splitlines() if len(ln.split(None, 1)) == 2
+            and os.path.basename(ln.split(None, 1)[1].strip()) == "codex"]
+    if not pids:
+        return {}
+    try:
+        out = subprocess.run(["lsof", "-nP", "-p", ",".join(pids), "-Ffn"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    homes = [str(h) for h in codex_homes(extra)]
+    got, pid, fd = {}, None, ""
+    for line in out.splitlines():
+        if line[:1] == "p" and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line[:1] == "f":
+            fd = line[1:]
+        elif line[:1] == "n" and pid:
+            name = line[1:]
+            if fd == "cwd":
+                got.setdefault(pid, [None, None])[1] = name
+            elif name.endswith(".jsonl") and "/rollout-" in name and any(name.startswith(h + "/sessions/") for h in homes):
+                got.setdefault(pid, [None, None])[0] = name
+    return {p: (Path(f), cwd) for p, (f, cwd) in got.items() if f}
 
 
 def status_text(s):
@@ -5617,6 +6038,8 @@ def group_switch(name, to_cfg, dry=False, extra=()):
         if not r:
             same = next(Path(to_cfg).glob(f"projects/*/{sid}.jsonl"), None)  # moved there already
             lines.append(t("gr_same", w=w, a=who) if same else t("gr_ended", w=w, c=hint))
+        elif r.get("tool") == "codex":
+            lines.append(t("gr_codex", w=w))
         elif Path(r["cfg"]).resolve() == Path(to_cfg).resolve():
             lines.append(t("gr_same", w=w, a=who))
         elif r["window"].startswith("fm-"):
@@ -5689,6 +6112,63 @@ def cmd_group(args):
             r = live.get(sid)
             print(f'  {"●" if r and r["status"] == "busy" else "○" if r else "-"} {r["name"] if r else "":8} '
                   f'{(r["title"] or r["tmux"]) if r else sid[:8] + " " + t("gr_off")}')
+
+
+def codex_line(r):
+    """One Codex account's official numbers, plan and credits, for `codex` and `usage`."""
+    now = time.time()
+    off = r["official"]
+    parts = [t("u_official", rows=rows_text(off["rows"]), a=ago(now - off["at"]))] if off else [t("cx_noff")]
+    if r["week_reset"]:
+        parts.append(t("u_reset", w=clock(r["week_reset"])))
+    if r["credits"] is not None:
+        parts.append(t("cx_credits", n=f"{r['credits']:,.0f}"))
+    head = t("u_cool", k=t("u_kind_week") if r["cool"]["kind"] == "seven_day" else t("u_kind_5h"),
+             w=clock(r["cool"]["until"])) if r["cool"] else t("u_ok")
+    return head + "  " + " · ".join(parts)
+
+
+def open_codex(home, cwd, who):
+    """A new tmux window (or terminal window) running codex with this folder's own login, in the folder it was used in last."""
+    cwd = cwd if cwd and Path(cwd).is_dir() else None
+    return cwd, open_window(term_script(home.name.lstrip("."), cwd, codex_env(home), [codex_exe()]), who)
+
+
+def cmd_codex(args):
+    if args.action == "login":
+        name = (args.target or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", name):
+            sys.exit(t("cx_login_name"))
+        home = HOME / f".codex-{name}"
+        home.mkdir(parents=True, exist_ok=True)
+        win = open_window(term_script(f"codex-login-{name}", None, codex_env(home), [codex_exe(), "login"],
+                                      after=[t("cx_login_after", n=name)]), f"codex login {name}")
+        print(t("cx_login_open", d=short(home), w=f"tmux {win}" if win else t("rs_term"), n=name))
+        return
+    rows = codex_rows(args.config or ())
+    if args.action == "term":
+        home = codex_home_of(args.target or "", args.config or ()) if args.target else (HOME / ".codex")
+        if not home or home not in codex_homes(args.config or ()):
+            sys.exit(t("cx_none", t=args.target or "~/.codex"))
+        r = next((r for r in rows if r["home"] == str(home)), None)
+        who = r["name"] if r else home.name
+        cwd, win = open_codex(home, r["cwd"] if r else "", who)
+        print(t("cx_open", a=who, d=short(Path(cwd)) if cwd else "~", w=f"tmux {win}" if win else t("rs_term"), c=codex_command(home)))
+        return
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False))
+        return
+    if not rows:
+        print(t("cx_empty"))
+        return
+    print(t("cx_title"))
+    for r in rows:
+        print(f"{r['name']:14} {r['plan'] or '-':9} {codex_line(r)}")
+        print(f"{'':14} {short(Path(r['home']))} · {t('cx_last', a=ago(time.time() - r['last']))} · {r['cli']}")
+    pick_ = codex_pick(rows)
+    if pick_ and len(rows) > 1:
+        print(t("cx_pick", a=pick_["name"]))
+    print(t("cx_notes"))
 
 
 def cmd_tmux(args):
@@ -6028,7 +6508,7 @@ def panel_api(method, path, q, body, extra=()):
         return 200, {"ok": ok, "log": log}
     if name == "name":
         label = str(body.get("label") or "").strip()
-        if acct not in by:
+        if acct not in by and acct not in codex_accounts():
             return bad
         if len(label) > 32 or any(ord(ch) < 32 for ch in label):
             return 200, {"ok": False, "log": t("pt_label_bad")}
@@ -6699,6 +7179,14 @@ def main(argv=None):
     ps.add_argument("--json", action="store_true", help="print them as JSON")
     ps.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
     ps.set_defaults(fn=cmd_ps)
+    cxp = sub.add_parser("codex", help="Codex logins: their official numbers and plans, a terminal on one, or "
+                                       "signing in another (each in its own CODEX_HOME folder); Codex sessions are not moved")
+    cxp.add_argument("action", nargs="?", default="list", choices=("list", "term", "login"))
+    cxp.add_argument("target", nargs="?", help="term: an account (label or id prefix) or folder name; login: a name, "
+                                               "for the folder ~/.codex-<name>")
+    cxp.add_argument("--json", action="store_true", help="list: as JSON")
+    cxp.add_argument("--config", action="append", help="also this Codex folder (repeatable)")
+    cxp.set_defaults(fn=cmd_codex)
     gp = sub.add_parser("group", help="your own groups of terminal sessions: list them, put sessions in one, "
                                       "or move a whole group to another account (idle ones restart there)")
     gp.add_argument("name", nargs="?", help="the group (made when the first session goes in)")

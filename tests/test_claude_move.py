@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 import urllib.parse
 from pathlib import Path
 
@@ -915,6 +916,127 @@ class Terminal(unittest.TestCase):
         self.run_tool("tmux", "conf", "--remove", CLAUDE_MOVE_TMUX=tm)
         self.assertEqual(conf.read_text(encoding="utf-8"), "set -g history-limit 5000\n")
         self.assertIn(["set-option", "-gu", "mouse"], self.tmux_calls())
+
+
+class Codex(unittest.TestCase):
+    """Codex logins: accounts and official numbers from Codex's own session files, search, resume, a new login."""
+    setUp, tearDown, run_tool = Usage.setUp, Usage.tearDown, Usage.run_tool
+    X, SID = "cccccccc-0000-0000-0000-00000000000c", "01a18409-7c80-7542-b7da-c7c19679ba7f"
+
+    def rollout(self, home, sid, acct, cwd, used=None, plan="prolite", busy=False, words="把额度做进面板", stamp="2026-10-29T03-42-56"):
+        iso = lambda s: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(s))
+        recs = [{"timestamp": iso(self.now - 600), "type": "session_meta", "payload": {
+                    "id": sid, "creator_account_id": acct, "cwd": cwd, "originator": "codex-tui", "timestamp": iso(self.now - 600)}},
+                {"timestamp": iso(self.now - 590), "type": "event_msg", "payload": {"type": "task_started"}},
+                {"timestamp": iso(self.now - 580), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "# AGENTS.md instructions for x\nsecretword"},
+                    {"type": "input_text", "text": "<environment_context>envword</environment_context>"}]}},
+                {"timestamp": iso(self.now - 570), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": words}]}},
+                {"timestamp": iso(self.now - 560), "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [
+                    {"type": "output_text", "text": "好，我先看 rate_limits"}]}}]
+        if used is not None:
+            recs.append({"timestamp": iso(self.now - 60), "type": "event_msg", "payload": {"type": "token_count", "rate_limits": {
+                "primary": {"used_percent": used, "window_minutes": 10080, "resets_at": int(self.now + 86400)},
+                "secondary": {"used_percent": 3.0, "window_minutes": 300, "resets_at": int(self.now - 60)},  # reset already
+                "credits": {"has_credits": True, "unlimited": False, "balance": "1234.5"}, "plan_type": plan}}})
+        if not busy:
+            recs.append({"timestamp": iso(self.now - 50), "type": "event_msg", "payload": {"type": "task_complete"}})
+        f = home / "sessions/2026/10/29" / f"rollout-{stamp}-{sid}.jsonl"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in recs), encoding="utf-8")
+        return f
+
+    def prepare(self):
+        self.cx = self.home / ".codex"
+        self.proj = self.home / "proj"
+        self.proj.mkdir()
+        self.f = self.rollout(self.cx, self.SID, self.X, str(self.proj), used=91.0)
+        (self.cx / "session_index.jsonl").write_text(json.dumps({"id": self.SID, "thread_name": "额度面板"}) + "\n", encoding="utf-8")
+        self.term = self.home / "term.log"
+        self.env = dict(CLAUDE_MOVE_TERM_CMD=append_cmd(self.term).replace("sys.stdin.read()", "open(sys.argv[2]).read()") ,
+                        CLAUDE_MOVE_TMUX="0")
+
+    def scripts(self):
+        return sorted((self.home / ".config/claude-move/term").glob("*"))
+
+    def test_accounts_numbers_and_names(self):
+        self.prepare()
+        sent = self.home / "sent.txt"
+        out = self.run_tool("codex", CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent), **self.env).stdout
+        self.assertIn("codex·cccccccc", out)
+        self.assertIn("Pro Lite", out)
+        self.assertIn("week 91%", out)
+        self.assertNotIn("5h", out)  # that window has reset: its old number is not shown
+        self.assertIn("1,234 credits", out)
+        self.assertIn("codex·cccccccc: week limit 91% used", sent.read_text(encoding="utf-8"))  # notified once
+        self.run_tool("codex", CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent), **self.env)
+        self.assertEqual(sent.read_text(encoding="utf-8").count("week limit 91%"), 1)
+        self.assertEqual(self.run_tool("name", "cccc", "cx-main").returncode, 0)
+        rows = json.loads(self.run_tool("codex", "--json", **self.env).stdout)
+        self.assertEqual([(r["name"], r["plan"], r["official"]["rows"][0]["percent"]) for r in rows], [("cx-main", "Pro Lite", 91.0)])
+        u = json.loads(self.run_tool("usage", "--json").stdout)
+        self.assertEqual([(r["name"], r["tool"]) for r in u["rows"] if r["tool"] == "codex"], [("cx-main", "codex")])
+        self.assertIn("Codex accounts", self.run_tool("usage").stdout)
+        # a second login, less used: the hint names it
+        self.rollout(self.home / ".codex-work", "01a18409-0000-7542-b7da-c7c19679ba70", "dddddddd-0000-0000-0000-00000000000d",
+                     str(self.proj), used=10.0)
+        out = self.run_tool("codex", **self.env).stdout
+        self.assertIn("Codex: use codex·dddddddd", out)
+        self.assertIn("CODEX_HOME=~/.codex-work codex", out)
+
+    def test_search_resume_and_login(self):
+        self.prepare()
+        r = self.run_tool("find", "额度", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("codex·cccccccc", r.stdout)
+        self.assertIn("额度面板", r.stdout)
+        self.assertIn(f"claude-move resume {self.SID[:8]}", r.stdout)
+        self.assertIn("No terminal session", self.run_tool("find", "secretword", **self.env).stdout)  # its own context is not searched
+        self.assertIn("No terminal session", self.run_tool("find", "envword", **self.env).stdout)
+        hits = json.loads(self.run_tool("find", "--json", "rate_limits", **self.env).stdout)
+        self.assertEqual([(h["sid"], h["tool"], h["acct"]) for h in hits], [(self.SID, "codex", self.X)])
+        self.assertNotEqual(self.run_tool("resume", self.SID[:8], "--to", "x", **self.env).returncode, 0)
+        r = self.run_tool("resume", self.SID[:8], **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        body = self.scripts()[-1].read_text(encoding="utf-8")
+        self.assertIn(f"resume {self.SID}", body)
+        self.assertIn(str(self.proj), body)
+        self.assertIn("unset CODEX_HOME" if not WIN else 'set "CODEX_HOME="', body)
+        # a new login in its own folder
+        self.assertNotEqual(self.run_tool("codex", "login", "bad name", **self.env).returncode, 0)
+        r = self.run_tool("codex", "login", "work", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.home / ".codex-work").is_dir())
+        body = next(p for p in self.scripts() if "codex-login-work" in p.name).read_text(encoding="utf-8")
+        self.assertIn("login", body)
+        self.assertIn(str(self.home / ".codex-work"), body)
+        r = self.run_tool("codex", "term", "cccc", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotEqual(self.run_tool("codex", "term", "nobody", **self.env).returncode, 0)
+
+    def test_running_sessions_and_the_panel(self):
+        self.prepare()
+        busy = self.rollout(self.cx, "01a18409-1111-7542-b7da-c7c19679ba71", self.X, str(self.proj), busy=True, stamp="2026-10-29T04-00-00")
+        with unittest.mock.patch.dict(os.environ, CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_HOME=str(self.home)):
+            cm = load_tool("cm_codex")
+        cm.codex_live = lambda extra=(): {os.getpid(): (busy, str(self.proj)), os.getppid(): (self.f, None)}
+        cm.tmux_panes = lambda: {}
+        rows = {r["sid"]: r for r in cm.live_sessions()}
+        self.assertEqual(rows[busy.stem[-36:]]["status"], "busy")
+        self.assertEqual((rows[self.SID]["status"], rows[self.SID]["title"], rows[self.SID]["tool"]), ("idle", "额度面板", "codex"))
+        # a group with a Codex session in it leaves that one where it is
+        cm.set_group([self.SID], "g")
+        ok, log = cm.group_switch("g", self.home / ".claude-x")
+        self.assertIn("a Codex session, left with its account", log)
+        # the panel: a Codex card with its own terminal button
+        Panel.start(self, **self.env)
+        page = Panel.call(self, f"/?t={self.token}", token=False)[1]
+        self.assertIn("Codex · Pro Lite", page)
+        self.assertIn('data-codex="1"', page)
+        code, out = Panel.call(self, "/terminal", {"acct": self.X, "codex": True})
+        self.assertEqual(code, 200, out)
+        self.assertEqual(Panel.call(self, "/terminal", {"acct": "nobody", "codex": True})[0], 404)
 
 
 class Plan(unittest.TestCase):

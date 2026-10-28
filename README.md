@@ -270,6 +270,28 @@ export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # in fi
   week left and the `fm-pin` command for it. Nothing switches crews on its own: firstmate leaves that file to its
   captain, and rotating accounts automatically is the kind of use Anthropic's terms may not allow.
 
+### Codex
+
+Codex logins sit beside the Claude ones. Codex keeps no per-account session list, so nothing is moved; the rest is
+the same. Each Codex folder (`~/.codex`, and `~/.codex-<name>` for another login through `CODEX_HOME`) is read for
+what its session files say: the account each session ran under (`creator_account_id`), and the official numbers
+Codex writes as it goes (`rate_limits`: the week and the 5-hour window, the plan, credits). Its `auth.json` is never
+opened.
+
+```bash
+claude-move codex                    # each Codex account: plan, official %, reset, credits, folder, the one to use
+claude-move codex login work         # sign another login into ~/.codex-work (codex login, in a new window)
+claude-move codex term work          # open Codex with that login, in the folder it was used in last
+claude-move name 320d codex-main     # name a Codex account like any other
+```
+
+`usage` (and `usage --json`, the panel's cards, the mod's status line) shows the Codex accounts after the Claude
+ones; notifications at 75/90/95% cover them too. `ps`, the panel's running list and the mod list running Codex
+sessions (macOS and Linux, from the session file each Codex process holds open), busy or idle, with their tmux
+window; `find` searches what was said in them and `resume <id>` resumes one with `codex resume` in its own folder
+and login. Pins, names and groups work on them as on Claude sessions; moving a group leaves its Codex sessions
+where they are.
+
 ## What it does not do
 
 - It does not move artifacts, projects or anything stored on claude.ai; those stay with the
@@ -405,6 +427,17 @@ export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # 写�
 - 保鲜：定时任务每次问这个登录的 `/usage`（不耗额度），别的登录每小时问一次。这个登录装了状态栏记录器的话，船员干活时也会顺手更新，最多一分钟一次。quota-axi 在窗口重置前都把快照当新的用，所以 `/usage` 连续失败一小时（退出登录、电脑睡太久），文件会挪成 `….stale`：firstmate 看到的是“没有 Claude 额度数据”，而不是旧数。没有官方数据时什么都不写，命令非零退出。
 - 每次写入记在 `~/.cache/claude-move/quota-snapshot.log`（账号、两个百分比、`refreshedAt`）。
 - 换号还是你来：船员用的号过 90%、95% 时，通知会写出本周剩得最多的号和对应的 `fm-pin` 命令。不会自动给船员换号：firstmate 规定这个文件只由船长改，而且自动轮换几个号，Anthropic 的条款未必允许。
+
+**Codex：** Codex 的登录和 Claude 的放在一起管。Codex 没有按号分开的会话列表，所以不搬会话，别的都一样。每个 Codex 文件夹（`~/.codex`，以及通过 `CODEX_HOME` 用的另一个登录 `~/.codex-<名字>`）只读它的会话记录：每个会话是哪个号跑的（`creator_account_id`），以及 Codex 一边跑一边写下的官方额度（`rate_limits`：本周和 5 小时窗口、套餐、credits）。从不打开它的 `auth.json`。
+
+```bash
+claude-move codex                    # 每个 Codex 号：套餐、官方百分比、重置时间、credits、文件夹、建议用哪个
+claude-move codex login work         # 在 ~/.codex-work 登录另一个号（新窗口里跑 codex login）
+claude-move codex term work          # 用这个登录打开 Codex，在它上次用的文件夹里
+claude-move name 320d codex-main     # 像别的号一样给 Codex 号起名
+```
+
+`usage`（以及 `usage --json`、面板卡片、mod 的状态栏）在 Claude 的号后面列出 Codex 的号，75/90/95% 的通知也管它们。`ps`、面板的在跑列表和 mod 都会列出在跑的 Codex 会话（macOS 和 Linux，看每个 Codex 进程开着的会话文件），忙还是空闲、在哪个 tmux 窗口；`find` 能搜它们里聊过的内容，`resume <id>` 用 `codex resume` 在它自己的文件夹和登录里接着做。置顶、起名、分组对它们一样有用；整组换号时，组里的 Codex 会话不动。
 
 **不做的事：** 不搬 artifact、项目这类存在 claude.ai 上的东西（它们跟着创建它的账号走）；从不读、不用登录凭据（`usage` 只读会话记录、账号 id 和桌面 App 日志里写着当前账号的那几行；`watch install` 只在你运行时改 `settings.json`，`watch uninstall` 会把原来的状态栏放回去）；会话里点过的“这次允许”不会带过去。
 
