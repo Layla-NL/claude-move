@@ -694,6 +694,15 @@ class Terminal(unittest.TestCase):
         # once the search index knows the session's own title, that names it rather than Claude Code's derived name
         self.run_tool("find", "x", CLAUDE_MOVE_TMUX=tm)
         self.assertEqual(json.loads(self.run_tool("ps", "--json", CLAUDE_MOVE_TMUX=tm).stdout)[0]["title"], "Login fixes")
+        # a name given in claude-move comes first, everywhere, follows into the window claude-move names, and comes off
+        self.tlog.unlink()
+        r = self.run_tool("ps", "--label", "w:1", "登录修复", CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.run_tool("ps", "--json", CLAUDE_MOVE_TMUX=tm).stdout)[0]["title"], "登录修复")
+        self.assertIn(["rename-window", "-t", "w:1", "● first·登录修复"], self.tmux_calls())
+        self.assertIn("登录修复", self.run_tool("find", "x", CLAUDE_MOVE_TMUX=tm).stdout)
+        self.run_tool("ps", "--label", self.S1[:8], "", CLAUDE_MOVE_TMUX=tm)
+        self.assertEqual(json.loads(self.run_tool("ps", "--json", CLAUDE_MOVE_TMUX=tm).stdout)[0]["title"], "Login fixes")
         # term opens a tmux window when tmux is running
         r = self.run_tool("term", "first", CLAUDE_MOVE_TMUX=tm, CLAUDE_MOVE_CLAUDE="/opt/x/claude")
         self.assertIn("tmux window w:2", r.stdout)

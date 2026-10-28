@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- `ps --label <target> <name>`: give a running session a name of your own, kept by claude-move in `~/.config/claude-move/labels.json` (transcripts and Claude Code's own names are not touched). It comes first in `ps`, the tmux menu, the panel and `find`, and windows claude-move names follow it; firstmate's `fm-*` windows keep their names. `""` takes it off.
+
 ## 0.8.0
 - `find <words>`: search what was said in every CLI login's terminal sessions (prompts, replies, titles; not tool output) through an index in `~/.cache/claude-move/search.db` (mode 0600) that reads each transcript once and then only what is appended. Hits show account, project, a snippet, whether the session is running, and how to resume it.
 - `resume <id> [--to <account>] [--here]`: resume a terminal session in its folder with its login, in a new tmux window or terminal window; `--to` copies it to another CLI login first. A running session is not started twice.
