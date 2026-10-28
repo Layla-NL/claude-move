@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 import urllib.parse
 from pathlib import Path
 
@@ -742,6 +743,62 @@ class Terminal(unittest.TestCase):
     def tmux_calls(self):
         return [json.loads(x) for x in self.tlog.read_text(encoding="utf-8").splitlines()] if self.tlog.exists() else []
 
+    def test_groups_and_moving_one(self):
+        if WIN:
+            self.skipTest("moving a group restarts sessions in tmux, which Windows does not have")
+        self.prepare()
+        # an idle claude standing in, on its own (so it is reaped when it quits), in a tmux pane of its own
+        r = subprocess.run([sys.executable, "-c", "import subprocess, sys; p = subprocess.Popen([sys.executable, '-c', "
+                            "'import time; time.sleep(60)'], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+                            "stderr=subprocess.DEVNULL); print(p.pid)"], capture_output=True, text=True)
+        pid = int(r.stdout)
+        self.addCleanup(lambda: subprocess.run(["kill", str(pid)], capture_output=True))
+        write(self.first / "sessions" / f"{pid}.json", pid=pid, sessionId=self.S1, cwd=str(self.proj), status="idle")
+        write(self.second / "sessions" / f"{os.getpid()}.json", pid=os.getpid(), sessionId=self.S2, cwd=str(self.proj), status="busy")
+        tm = str(self.tmux_stub(pid))
+        env = dict(CLAUDE_MOVE_TMUX=tm, CLAUDE_MOVE_CLAUDE="claude")
+        self.assertIn("No groups yet", self.run_tool("group", **env).stderr)
+        r = self.run_tool("group", "客户 A", self.S1[:8], **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("is in 客户 A now", r.stdout)
+        self.assertEqual(self.run_tool("group", "实验", str(os.getpid()), **env).returncode, 0)
+        rows = json.loads(self.run_tool("ps", "--json", **env).stdout)
+        self.assertEqual([(x["sid"], x["group"]) for x in rows], [(self.S1, "客户 A"), (self.S2, "实验")])  # by group, not busy first
+        self.assertIn("[客户 A]", self.run_tool("ps", **env).stdout)
+        out = self.run_tool("group", **env).stdout
+        self.assertIn("客户 A: 1 session(s)", out)
+        self.assertIn("实验: 1 session(s)", out)
+        # a dry run changes nothing; a busy member is left; the idle one in tmux quits and resumes on the other login
+        r = self.run_tool("group", "客户 A", "--to", "second", "--dry-run", **env)
+        self.assertIn("would quit and resume on second", r.stdout)
+        self.assertTrue(os.path.exists(f"/proc/{pid}") or subprocess.run(["kill", "-0", str(pid)]).returncode == 0)
+        self.assertIn("busy, left as it is", self.run_tool("group", "实验", "--to", "first", **env).stdout)
+        r = self.run_tool("group", "客户 A", "--to", "second", **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("resumed on second", r.stdout)
+        self.assertNotEqual(subprocess.run(["kill", "-0", str(pid)], capture_output=True).returncode, 0)
+        self.assertTrue((self.second / "projects/-proj" / f"{self.S1}.jsonl").exists())  # copied, and the first kept
+        self.assertTrue(self.t1.exists())
+        self.assertTrue(any(c[0] == "new-window" for c in self.tmux_calls()))
+        self.assertIn("客户 A (on second): 1 session(s)", self.run_tool("group", **env).stdout)
+        # once it is gone, it says how to go on there; out of its group by id, and an empty group goes
+        self.assertIn("already on second", self.run_tool("group", "客户 A", "--to", "second", **env).stdout)
+        self.assertEqual(self.run_tool("group", "--out", self.S1[:8], **env).returncode, 0)
+        self.assertNotIn("客户 A", self.run_tool("group", **env).stdout)
+        self.assertNotEqual(self.run_tool("group", "nope", "--to", "second", **env).returncode, 0)
+        # the panel: a group per session, and a whole group's move, values checked
+        Panel.start(self, **env)
+        api = lambda name, body=None: json.loads(Panel.call(self, "/api/" + name, body)[1])
+        lv = api("live")
+        self.assertEqual([g["name"] for g in lv["groups"]], ["实验"])
+        self.assertEqual(sorted(x["name"] for x in lv["logins"]), ["first", "second"])
+        self.assertTrue(api("live", {"do": "group", "sid": self.S2, "name": "  b  "})["ok"])
+        self.assertEqual(api("live")["rows"][0]["group"], "b")
+        self.assertEqual(Panel.call(self, "/api/live", {"do": "group", "sid": "nope", "name": "x"})[0], 400)
+        self.assertEqual(Panel.call(self, "/api/live", {"do": "switch", "name": "nope", "acct": self.a})[0], 400)
+        self.assertEqual(Panel.call(self, "/api/live", {"do": "switch", "name": "b", "acct": "nobody"})[0], 400)
+        self.assertIn("busy, left as it is", api("live", {"do": "switch", "name": "b", "acct": self.a})["log"])
+
     def test_find_reads_what_was_said_and_resume_opens_it(self):
         self.prepare()
         r = self.run_tool("find", "登录", CLAUDE_MOVE_TMUX="0")
@@ -859,6 +916,127 @@ class Terminal(unittest.TestCase):
         self.run_tool("tmux", "conf", "--remove", CLAUDE_MOVE_TMUX=tm)
         self.assertEqual(conf.read_text(encoding="utf-8"), "set -g history-limit 5000\n")
         self.assertIn(["set-option", "-gu", "mouse"], self.tmux_calls())
+
+
+class Codex(unittest.TestCase):
+    """Codex logins: accounts and official numbers from Codex's own session files, search, resume, a new login."""
+    setUp, tearDown, run_tool = Usage.setUp, Usage.tearDown, Usage.run_tool
+    X, SID = "cccccccc-0000-0000-0000-00000000000c", "01a18409-7c80-7542-b7da-c7c19679ba7f"
+
+    def rollout(self, home, sid, acct, cwd, used=None, plan="prolite", busy=False, words="把额度做进面板", stamp="2026-10-29T03-42-56"):
+        iso = lambda s: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(s))
+        recs = [{"timestamp": iso(self.now - 600), "type": "session_meta", "payload": {
+                    "id": sid, "creator_account_id": acct, "cwd": cwd, "originator": "codex-tui", "timestamp": iso(self.now - 600)}},
+                {"timestamp": iso(self.now - 590), "type": "event_msg", "payload": {"type": "task_started"}},
+                {"timestamp": iso(self.now - 580), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "# AGENTS.md instructions for x\nsecretword"},
+                    {"type": "input_text", "text": "<environment_context>envword</environment_context>"}]}},
+                {"timestamp": iso(self.now - 570), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": words}]}},
+                {"timestamp": iso(self.now - 560), "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [
+                    {"type": "output_text", "text": "好，我先看 rate_limits"}]}}]
+        if used is not None:
+            recs.append({"timestamp": iso(self.now - 60), "type": "event_msg", "payload": {"type": "token_count", "rate_limits": {
+                "primary": {"used_percent": used, "window_minutes": 10080, "resets_at": int(self.now + 86400)},
+                "secondary": {"used_percent": 3.0, "window_minutes": 300, "resets_at": int(self.now - 60)},  # reset already
+                "credits": {"has_credits": True, "unlimited": False, "balance": "1234.5"}, "plan_type": plan}}})
+        if not busy:
+            recs.append({"timestamp": iso(self.now - 50), "type": "event_msg", "payload": {"type": "task_complete"}})
+        f = home / "sessions/2026/10/29" / f"rollout-{stamp}-{sid}.jsonl"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in recs), encoding="utf-8")
+        return f
+
+    def prepare(self):
+        self.cx = self.home / ".codex"
+        self.proj = self.home / "proj"
+        self.proj.mkdir()
+        self.f = self.rollout(self.cx, self.SID, self.X, str(self.proj), used=91.0)
+        (self.cx / "session_index.jsonl").write_text(json.dumps({"id": self.SID, "thread_name": "额度面板"}) + "\n", encoding="utf-8")
+        self.term = self.home / "term.log"
+        self.env = dict(CLAUDE_MOVE_TERM_CMD=append_cmd(self.term).replace("sys.stdin.read()", "open(sys.argv[2]).read()") ,
+                        CLAUDE_MOVE_TMUX="0")
+
+    def scripts(self):
+        return sorted((self.home / ".config/claude-move/term").glob("*"))
+
+    def test_accounts_numbers_and_names(self):
+        self.prepare()
+        sent = self.home / "sent.txt"
+        out = self.run_tool("codex", CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent), **self.env).stdout
+        self.assertIn("codex·cccccccc", out)
+        self.assertIn("Pro Lite", out)
+        self.assertIn("week 91%", out)
+        self.assertNotIn("5h", out)  # that window has reset: its old number is not shown
+        self.assertIn("1,234 credits", out)
+        self.assertIn("codex·cccccccc: week limit 91% used", sent.read_text(encoding="utf-8"))  # notified once
+        self.run_tool("codex", CLAUDE_MOVE_NOTIFY_CMD=append_cmd(sent), **self.env)
+        self.assertEqual(sent.read_text(encoding="utf-8").count("week limit 91%"), 1)
+        self.assertEqual(self.run_tool("name", "cccc", "cx-main").returncode, 0)
+        rows = json.loads(self.run_tool("codex", "--json", **self.env).stdout)
+        self.assertEqual([(r["name"], r["plan"], r["official"]["rows"][0]["percent"]) for r in rows], [("cx-main", "Pro Lite", 91.0)])
+        u = json.loads(self.run_tool("usage", "--json").stdout)
+        self.assertEqual([(r["name"], r["tool"]) for r in u["rows"] if r["tool"] == "codex"], [("cx-main", "codex")])
+        self.assertIn("Codex accounts", self.run_tool("usage").stdout)
+        # a second login, less used: the hint names it
+        self.rollout(self.home / ".codex-work", "01a18409-0000-7542-b7da-c7c19679ba70", "dddddddd-0000-0000-0000-00000000000d",
+                     str(self.proj), used=10.0)
+        out = self.run_tool("codex", **self.env).stdout
+        self.assertIn("Codex: use codex·dddddddd", out)
+        self.assertIn("$env:CODEX_HOME=" if WIN else "CODEX_HOME=~/.codex-work codex", out)  # as typed in that shell
+
+    def test_search_resume_and_login(self):
+        self.prepare()
+        r = self.run_tool("find", "额度", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("codex·cccccccc", r.stdout)
+        self.assertIn("额度面板", r.stdout)
+        self.assertIn(f"claude-move resume {self.SID[:8]}", r.stdout)
+        self.assertIn("No terminal session", self.run_tool("find", "secretword", **self.env).stdout)  # its own context is not searched
+        self.assertIn("No terminal session", self.run_tool("find", "envword", **self.env).stdout)
+        hits = json.loads(self.run_tool("find", "--json", "rate_limits", **self.env).stdout)
+        self.assertEqual([(h["sid"], h["tool"], h["acct"]) for h in hits], [(self.SID, "codex", self.X)])
+        self.assertNotEqual(self.run_tool("resume", self.SID[:8], "--to", "x", **self.env).returncode, 0)
+        r = self.run_tool("resume", self.SID[:8], **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        body = self.scripts()[-1].read_text(encoding="utf-8")
+        self.assertIn(f"resume {self.SID}", body)
+        self.assertIn(str(self.proj), body)
+        self.assertIn("unset CODEX_HOME" if not WIN else 'set "CODEX_HOME="', body)
+        # a new login in its own folder
+        self.assertNotEqual(self.run_tool("codex", "login", "bad name", **self.env).returncode, 0)
+        r = self.run_tool("codex", "login", "work", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.home / ".codex-work").is_dir())
+        body = next(p for p in self.scripts() if "codex-login-work" in p.name).read_text(encoding="utf-8")
+        self.assertIn("login", body)
+        self.assertIn(str(self.home / ".codex-work"), body)
+        r = self.run_tool("codex", "term", "cccc", **self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotEqual(self.run_tool("codex", "term", "nobody", **self.env).returncode, 0)
+
+    def test_running_sessions_and_the_panel(self):
+        self.prepare()
+        busy = self.rollout(self.cx, "01a18409-1111-7542-b7da-c7c19679ba71", self.X, str(self.proj), busy=True, stamp="2026-10-29T04-00-00")
+        with unittest.mock.patch.dict(os.environ, CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_HOME=str(self.home)):
+            cm = load_tool("cm_codex")
+        cm.codex_live = lambda extra=(): {os.getpid(): (busy, str(self.proj)), os.getppid(): (self.f, None)}
+        cm.tmux_panes = lambda: {}
+        rows = {r["sid"]: r for r in cm.live_sessions()}
+        self.assertEqual(rows[busy.stem[-36:]]["status"], "busy")
+        self.assertEqual((rows[self.SID]["status"], rows[self.SID]["title"], rows[self.SID]["tool"]), ("idle", "额度面板", "codex"))
+        # a group with a Codex session in it leaves that one where it is
+        cm.set_group([self.SID], "g")
+        ok, log = cm.group_switch("g", self.home / ".claude-x")
+        self.assertIn("a Codex session, left with its account", log)
+        # the panel: a Codex card with its own terminal button
+        Panel.start(self, **self.env)
+        page = Panel.call(self, f"/?t={self.token}", token=False)[1]
+        self.assertIn("Codex · Pro Lite", page)
+        self.assertIn('data-codex="1"', page)
+        code, out = Panel.call(self, "/terminal", {"acct": self.X, "codex": True})
+        self.assertEqual(code, 200, out)
+        self.assertEqual(Panel.call(self, "/terminal", {"acct": "nobody", "codex": True})[0], 404)
 
 
 class Plan(unittest.TestCase):

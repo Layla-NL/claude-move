@@ -15,8 +15,8 @@ const PANE = {
 } as const
 
 const PS = [
-  { pid: 1, sid: 'aaaaaaaa-1', name: 'main', title: '二副·群聊', status: 'busy', project: '~/fm', tmux: 'firstmate:15.0', pin: true },
-  { pid: 2, sid: 'bbbbbbbb-2', name: 'outlook', title: 'claude-move 维护', status: 'idle', project: '~/cm', tmux: '', pin: false },
+  { pid: 1, sid: 'aaaaaaaa-1', name: 'main', title: '二副·群聊', status: 'busy', project: '~/fm', tmux: 'firstmate:15.0', pin: true, group: '' },
+  { pid: 2, sid: 'bbbbbbbb-2', name: 'outlook', title: 'claude-move 维护', status: 'idle', project: '~/cm', tmux: '', pin: false, group: '实验' },
 ]
 const USAGE = {
   pick: 'main',
@@ -59,6 +59,7 @@ test('the pane lists running sessions, and its buttons run claude-move', async (
 
   expect((await ui.find({ type: 'Text', text: /二副·群聊/ }))?.text).toContain('二副·群聊')
   expect((await ui.find({ type: 'Text', text: /main/ }))?.text).toContain('18%')
+  expect((await ui.find({ type: 'Text', text: /^实验$/ }))?.text).toBe('实验')
 
   await ui.press({ key: 'pin-aaaaaaaa-1' })
   expect(ran).toContainEqual(['claude-move', 'ps', '--unpin', 'aaaaaaaa-1'])

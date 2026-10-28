@@ -95,6 +95,7 @@ write `py $HOME\claude-move.py` wherever this page says `claude-move`. What is d
 | `claude-move find <words> [--account A] [--json]` | Search what was said in the terminal sessions of every CLI login: your prompts, Claude's replies and session titles (not tool output). Each hit shows the account, project, a snippet, whether it is running, and `claude-move resume <id>`. The first search reads every transcript once into `~/.cache/claude-move/search.db` (readable only by you); later ones read only what is new |
 | `claude-move resume <id> [--to <account>] [--here]` | Resume a terminal session in its own folder with its own login: in a new tmux window when tmux is running, else a new terminal window; `--here` in this one. `--to` copies it into another account's CLI login first (copy only, as `run` does) and resumes it there. A session that is already running is not started twice |
 | `claude-move ps [--go <target>] [--label <target> <name>] [--pin\|--unpin <target>...] [--json]` | Claude Code sessions running now, from every CLI login: account, busy or idle, tmux window, name, folder. `--go` shows one (by tmux target, session id prefix or pid) in the terminal attached to tmux, or opens a terminal attached to it. `--label` gives one a name of your own (`""` takes it off), kept in `~/.config/claude-move/labels.json` and shown first in `ps`, the tmux menu, the panel and `find`; windows claude-move names follow it, and windows other tools named (firstmate's `fm-*`) keep their names. `--pin` keeps sessions at the top of `ps`, the tmux menu and the panel (📌), `--unpin` takes them off, also by id once a session has ended |
+| `claude-move group [<name> [<session>...]] [--to <account>] [--out] [--dry-run]` | Your own groups of terminal sessions, kept in `~/.config/claude-move/groups.json`; `ps`, the panel and the mod list each group together. `group <name> <session>...` puts sessions in a group (made then; a session is in one group at most), `--out` takes them out. `group <name> --to <account>` moves the whole group to another CLI login: each idle member running in tmux quits and resumes there, copied first, with its conversation and id kept. Busy members, members outside tmux, sessions with nothing said yet and firstmate's crews (switched with `fm-pin`) are left as they are, each with what to do |
 | `claude-move tmux [name\|line\|menu\|conf]` | `name` names each tmux window that holds one Claude session `account·session` (● while busy); windows someone else named, such as firstmate's, stay as they are. `line` prints running sessions per account for the status bar, `menu` pops up a menu of them. `conf --install` adds a block to `~/.tmux.conf` (backed up first) that wires these up: mouse on, `line` in the status bar every 15 s, prefix + S for the menu; `conf --remove` takes it out and puts tmux's defaults back |
 | `claude-move import-cli --config DIR [--project PATH] [--session ID] [--days N] [--dry-run]` | Copy CLI session transcripts from another config folder (e.g. a second account under `CLAUDE_CONFIG_DIR=~/.claude-work`) into `~/.claude`, so the desktop app can open them. Never overwrites. A project folder name that starts with `-` needs `--project=-Users-me-app` |
 
@@ -269,6 +270,28 @@ export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # in fi
   week left and the `fm-pin` command for it. Nothing switches crews on its own: firstmate leaves that file to its
   captain, and rotating accounts automatically is the kind of use Anthropic's terms may not allow.
 
+### Codex
+
+Codex logins sit beside the Claude ones. Codex keeps no per-account session list, so nothing is moved; the rest is
+the same. Each Codex folder (`~/.codex`, and `~/.codex-<name>` for another login through `CODEX_HOME`) is read for
+what its session files say: the account each session ran under (`creator_account_id`), and the official numbers
+Codex writes as it goes (`rate_limits`: the week and the 5-hour window, the plan, credits). Its `auth.json` is never
+opened.
+
+```bash
+claude-move codex                    # each Codex account: plan, official %, reset, credits, folder, the one to use
+claude-move codex login work         # sign another login into ~/.codex-work (codex login, in a new window)
+claude-move codex term work          # open Codex with that login, in the folder it was used in last
+claude-move name 320d codex-main     # name a Codex account like any other
+```
+
+`usage` (and `usage --json`, the panel's cards, the mod's status line) shows the Codex accounts after the Claude
+ones; notifications at 75/90/95% cover them too. `ps`, the panel's running list and the mod list running Codex
+sessions (macOS and Linux, from the session file each Codex process holds open), busy or idle, with their tmux
+window; `find` searches what was said in them and `resume <id>` resumes one with `codex resume` in its own folder
+and login. Pins, names and groups work on them as on Claude sessions; moving a group leaves its Codex sessions
+where they are.
+
 ## What it does not do
 
 - It does not move artifacts, projects or anything stored on claude.ai; those stay with the
@@ -341,6 +364,7 @@ py $HOME\claude-move.py app install     # 开始菜单和桌面上会出现 “C
 - `find <词> [--account 账号] [--json]`：搜所有命令行登录的终端会话里聊过的内容：你说的话、Claude 的回答、会话标题（不搜工具输出）。每条结果显示账号、项目、片段、是不是正在跑，以及 `claude-move resume <id>`。第一次搜会把所有会话记录读一遍，存进 `~/.cache/claude-move/search.db`（只有你能读），之后只读新增的。
 - `resume <id> [--to 账号] [--here]`：在会话自己的文件夹、用它自己的登录接着跑：tmux 开着就开一个新的 tmux 窗口，不然开新终端窗口；`--here` 就在当前终端。`--to` 先把会话复制到另一个号的命令行登录（只复制，和 `run` 一样）再在那边接上。已经在跑的会话不会再开第二个。
 - `ps [--go 目标] [--label 目标 名字] [--pin|--unpin 目标…] [--json]`：现在在跑的 Claude Code 会话，所有命令行登录都算：账号、忙还是空闲、在哪个 tmux 窗口、名字、文件夹。`--go` 切过去（按 tmux 目标、会话 id 开头或进程号），在连着 tmux 的终端里显示，没有就开一个终端连上。`--label` 给会话起你自己的名字（写 `""` 去掉），存在 `~/.config/claude-move/labels.json`，`ps`、tmux 菜单、面板和 `find` 都先用它；claude-move 起名的窗口跟着改，别的工具起名的窗口（firstmate 的 `fm-*`）名字不动。`--pin` 把会话置顶（📌），`ps`、tmux 菜单和面板里都排最前，可以一次写好几个；`--unpin` 取消，会话结束了也能按 id 取消。
+- `group [组名 [会话…]] [--to 账号] [--out] [--dry-run]`：自己给终端会话分组，存在 `~/.config/claude-move/groups.json`；`ps`、面板和 mod 里同组的排在一起。`group 组名 会话…` 把会话放进组（组随之建好；一个会话只在一个组里），`--out` 移出。`group 组名 --to 账号` 整组换号：tmux 里空闲的组员会退出，先拷到那个号的命令行登录，再在那边接着做，对话和会话 id 都不变。正在忙的、不在 tmux 里的、还没聊过的、firstmate 的船员（用 `fm-pin` 换）都不动，各自说明怎么办。面板的会话列表里每行有分组按钮，每组标题旁边可以选“这组换到…”。
 - `tmux [name|line|menu|conf]`：`name` 把只装着一个 Claude 会话的 tmux 窗口改名成“账号·会话名”（忙的时候前面有 ●）；别人起过名的窗口（比如 firstmate 的）不动。`line` 输出给状态栏用的各账号会话数，`menu` 弹出会话菜单。`conf --install` 往 `~/.tmux.conf` 加一段（先备份）把这些接上：开鼠标、状态栏每 15 秒显示一次 `line`、前缀键 + S 弹菜单；`conf --remove` 去掉这段并恢复 tmux 默认。
 - `fm-pin [<账号>] [--group 船员|常驻] [--relaunch]`：给 [firstmate](https://github.com/kunchenguid/firstmate) 用，按组换号。不带账号时列出各命令行登录的官方额度，以及船员、常驻两组各用哪个号；带账号时先确认这个登录 `/usage` 能回、没在冷却（`--force` 照样钉）。默认换的是船员组：写 firstmate 的 `config/claude-account`，每个二副自己家里的那份也一起改，快照跟着换到这个号；之后新起的船员用它，已经在跑的不变。`--group 常驻` 换的是二副本身（`config/secondmate-accounts/<id>/claude-account`），每个二副重启后才生效，加 `--relaunch` 会通过 firstmate 的 `bin/fm-control.sh` 重启空闲的那些。
 - `quota-snapshot [--refresh] [--account 账号] [--out 文件]`：把一个号的官方百分比写成 quota-axi 的缓存格式，firstmate 的 quota-axi 通过 `QUOTA_AXI_SNAPSHOT` 读它，不碰登录和钥匙串（见下面）。`schedule [--every 10]` / `unschedule` 定时刷新（macOS 用 launchd，Windows 用任务计划程序）；`status` 看钉的号、文件和定时。
@@ -403,6 +427,17 @@ export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # 写�
 - 保鲜：定时任务每次问这个登录的 `/usage`（不耗额度），别的登录每小时问一次。这个登录装了状态栏记录器的话，船员干活时也会顺手更新，最多一分钟一次。quota-axi 在窗口重置前都把快照当新的用，所以 `/usage` 连续失败一小时（退出登录、电脑睡太久），文件会挪成 `….stale`：firstmate 看到的是“没有 Claude 额度数据”，而不是旧数。没有官方数据时什么都不写，命令非零退出。
 - 每次写入记在 `~/.cache/claude-move/quota-snapshot.log`（账号、两个百分比、`refreshedAt`）。
 - 换号还是你来：船员用的号过 90%、95% 时，通知会写出本周剩得最多的号和对应的 `fm-pin` 命令。不会自动给船员换号：firstmate 规定这个文件只由船长改，而且自动轮换几个号，Anthropic 的条款未必允许。
+
+**Codex：** Codex 的登录和 Claude 的放在一起管。Codex 没有按号分开的会话列表，所以不搬会话，别的都一样。每个 Codex 文件夹（`~/.codex`，以及通过 `CODEX_HOME` 用的另一个登录 `~/.codex-<名字>`）只读它的会话记录：每个会话是哪个号跑的（`creator_account_id`），以及 Codex 一边跑一边写下的官方额度（`rate_limits`：本周和 5 小时窗口、套餐、credits）。从不打开它的 `auth.json`。
+
+```bash
+claude-move codex                    # 每个 Codex 号：套餐、官方百分比、重置时间、credits、文件夹、建议用哪个
+claude-move codex login work         # 在 ~/.codex-work 登录另一个号（新窗口里跑 codex login）
+claude-move codex term work          # 用这个登录打开 Codex，在它上次用的文件夹里
+claude-move name 320d codex-main     # 像别的号一样给 Codex 号起名
+```
+
+`usage`（以及 `usage --json`、面板卡片、mod 的状态栏）在 Claude 的号后面列出 Codex 的号，75/90/95% 的通知也管它们。`ps`、面板的在跑列表和 mod 都会列出在跑的 Codex 会话（macOS 和 Linux，看每个 Codex 进程开着的会话文件），忙还是空闲、在哪个 tmux 窗口；`find` 能搜它们里聊过的内容，`resume <id>` 用 `codex resume` 在它自己的文件夹和登录里接着做。置顶、起名、分组对它们一样有用；整组换号时，组里的 Codex 会话不动。
 
 **不做的事：** 不搬 artifact、项目这类存在 claude.ai 上的东西（它们跟着创建它的账号走）；从不读、不用登录凭据（`usage` 只读会话记录、账号 id 和桌面 App 日志里写着当前账号的那几行；`watch install` 只在你运行时改 `settings.json`，`watch uninstall` 会把原来的状态栏放回去）；会话里点过的“这次允许”不会带过去。
 
