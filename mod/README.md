@@ -7,7 +7,7 @@ A Claude Code mod that puts [claude-move](https://github.com/Layla-NL/claude-mov
 - **`/cm-find <words>`:** searches what was said in every terminal session. ↩ resumes a hit in a new tmux window or terminal window, and → goes to it if it is running.
 - **Move** (a page of `/cm`): after you sign the desktop app into another account, copy your sessions into it from the account you used before. The first press shows what would change; the second quits the app, copies (backing up the list first) and opens the app again. A claude-move running on its own does that, so quitting the app does not stop it, and a notification says how it went. Undo the last move the same way.
 
-It needs claude-move 0.8.2 or newer, on `PATH` or in `~/.local/bin`. Each button runs one claude-move command, so claude-move's rules hold: it copies and never deletes, backs up before it writes, and never reads login credentials.
+It needs claude-move 0.8.3 or newer, on `PATH` or in `~/.local/bin`. Each button runs one claude-move command, so claude-move's rules hold: it copies and never deletes, backs up before it writes, and never reads login credentials.
 
 ## Install
 
@@ -36,7 +36,7 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
 - **`/cm-find 关键词`**：按聊过的内容搜所有终端会话。↩ 在新的 tmux 窗口或终端里接着做；会话还在跑的话，→ 直接切过去。
 - **搬会话**（`/cm` 里的一页）：桌面 App 登上另一个号以后，把之前那个号的会话拷过来。第一次按只预览要搬什么；第二次按才会关掉 App、搬（先备份列表）、再打开 App。这一步交给独立运行的 claude-move 去做，所以 App 关掉也不会打断，做完会弹通知。上次搬家也能同样两下撤回。
 
-需要 claude-move 0.8.2 或更新的版本，放在 `PATH` 里或 `~/.local/bin`。每个按钮都只运行一条 claude-move 命令，所以 claude-move 的规矩照样成立：只拷贝、不删除，写之前先备份，不读登录凭据。
+需要 claude-move 0.8.3 或更新的版本，放在 `PATH` 里或 `~/.local/bin`。每个按钮都只运行一条 claude-move 命令，所以 claude-move 的规矩照样成立：只拷贝、不删除，写之前先备份，不读登录凭据。
 
 ## 安装
 
