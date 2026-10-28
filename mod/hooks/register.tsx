@@ -22,6 +22,7 @@ const T = {
   find: ['Search', '搜索'],
   refresh: ['Refresh', '刷新'],
   none: ['No Claude Code session is running.', '现在没有在跑的 Claude Code 会话。'],
+  ungrouped: ['Not in a group', '未分组'],
   missing: ['claude-move is not installed: see github.com/Layla-NL/claude-move',
             '没找到 claude-move：先装上它（github.com/Layla-NL/claude-move）'],
   week: ['week', '本周'],
@@ -238,11 +239,15 @@ export const register: Register = on => {
       </Box>
     )
 
+    const grouped = rows.some(r => r.group)
     const liveList = (
       <Box flexDirection="column">
         {rows.length === 0 && <Text dimColor>{t('none')}</Text>}
-        {rows.slice(0, room).map(r => (
+        {rows.slice(0, room).map((r, i, shown) => (
           <Box key={`row-${r.sid}`} flexDirection="column">
+            {grouped && !r.pin && (!shown[i - 1] || shown[i - 1]?.pin || shown[i - 1]?.group !== r.group) && (
+              <Text dimColor bold>{r.group || t('ungrouped')}</Text>
+            )}
             <Box columnGap={1}>
               <Text color={r.status === 'busy' ? 'red' : undefined} dimColor={r.status !== 'busy'}>
                 {r.status === 'busy' ? '●' : '○'}

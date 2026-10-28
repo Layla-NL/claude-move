@@ -742,6 +742,62 @@ class Terminal(unittest.TestCase):
     def tmux_calls(self):
         return [json.loads(x) for x in self.tlog.read_text(encoding="utf-8").splitlines()] if self.tlog.exists() else []
 
+    def test_groups_and_moving_one(self):
+        if WIN:
+            self.skipTest("moving a group restarts sessions in tmux, which Windows does not have")
+        self.prepare()
+        # an idle claude standing in, on its own (so it is reaped when it quits), in a tmux pane of its own
+        r = subprocess.run([sys.executable, "-c", "import subprocess, sys; p = subprocess.Popen([sys.executable, '-c', "
+                            "'import time; time.sleep(60)'], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+                            "stderr=subprocess.DEVNULL); print(p.pid)"], capture_output=True, text=True)
+        pid = int(r.stdout)
+        self.addCleanup(lambda: subprocess.run(["kill", str(pid)], capture_output=True))
+        write(self.first / "sessions" / f"{pid}.json", pid=pid, sessionId=self.S1, cwd=str(self.proj), status="idle")
+        write(self.second / "sessions" / f"{os.getpid()}.json", pid=os.getpid(), sessionId=self.S2, cwd=str(self.proj), status="busy")
+        tm = str(self.tmux_stub(pid))
+        env = dict(CLAUDE_MOVE_TMUX=tm, CLAUDE_MOVE_CLAUDE="claude")
+        self.assertIn("No groups yet", self.run_tool("group", **env).stderr)
+        r = self.run_tool("group", "客户 A", self.S1[:8], **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("is in 客户 A now", r.stdout)
+        self.assertEqual(self.run_tool("group", "实验", str(os.getpid()), **env).returncode, 0)
+        rows = json.loads(self.run_tool("ps", "--json", **env).stdout)
+        self.assertEqual([(x["sid"], x["group"]) for x in rows], [(self.S1, "客户 A"), (self.S2, "实验")])  # by group, not busy first
+        self.assertIn("[客户 A]", self.run_tool("ps", **env).stdout)
+        out = self.run_tool("group", **env).stdout
+        self.assertIn("客户 A: 1 session(s)", out)
+        self.assertIn("实验: 1 session(s)", out)
+        # a dry run changes nothing; a busy member is left; the idle one in tmux quits and resumes on the other login
+        r = self.run_tool("group", "客户 A", "--to", "second", "--dry-run", **env)
+        self.assertIn("would quit and resume on second", r.stdout)
+        self.assertTrue(os.path.exists(f"/proc/{pid}") or subprocess.run(["kill", "-0", str(pid)]).returncode == 0)
+        self.assertIn("busy, left as it is", self.run_tool("group", "实验", "--to", "first", **env).stdout)
+        r = self.run_tool("group", "客户 A", "--to", "second", **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("resumed on second", r.stdout)
+        self.assertNotEqual(subprocess.run(["kill", "-0", str(pid)], capture_output=True).returncode, 0)
+        self.assertTrue((self.second / "projects/-proj" / f"{self.S1}.jsonl").exists())  # copied, and the first kept
+        self.assertTrue(self.t1.exists())
+        self.assertTrue(any(c[0] == "new-window" for c in self.tmux_calls()))
+        self.assertIn("客户 A (on second): 1 session(s)", self.run_tool("group", **env).stdout)
+        # once it is gone, it says how to go on there; out of its group by id, and an empty group goes
+        self.assertIn("already on second", self.run_tool("group", "客户 A", "--to", "second", **env).stdout)
+        self.assertEqual(self.run_tool("group", "--out", self.S1[:8], **env).returncode, 0)
+        self.assertNotIn("客户 A", self.run_tool("group", **env).stdout)
+        self.assertNotEqual(self.run_tool("group", "nope", "--to", "second", **env).returncode, 0)
+        # the panel: a group per session, and a whole group's move, values checked
+        Panel.start(self, **env)
+        api = lambda name, body=None: json.loads(Panel.call(self, "/api/" + name, body)[1])
+        lv = api("live")
+        self.assertEqual([g["name"] for g in lv["groups"]], ["实验"])
+        self.assertEqual(sorted(x["name"] for x in lv["logins"]), ["first", "second"])
+        self.assertTrue(api("live", {"do": "group", "sid": self.S2, "name": "  b  "})["ok"])
+        self.assertEqual(api("live")["rows"][0]["group"], "b")
+        self.assertEqual(Panel.call(self, "/api/live", {"do": "group", "sid": "nope", "name": "x"})[0], 400)
+        self.assertEqual(Panel.call(self, "/api/live", {"do": "switch", "name": "nope", "acct": self.a})[0], 400)
+        self.assertEqual(Panel.call(self, "/api/live", {"do": "switch", "name": "b", "acct": "nobody"})[0], 400)
+        self.assertIn("busy, left as it is", api("live", {"do": "switch", "name": "b", "acct": self.a})["log"])
+
     def test_find_reads_what_was_said_and_resume_opens_it(self):
         self.prepare()
         r = self.run_tool("find", "登录", CLAUDE_MOVE_TMUX="0")

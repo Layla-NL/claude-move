@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- `group`: your own groups of terminal sessions (`~/.config/claude-move/groups.json`), listed together in `ps`, the panel and the mod. `group <name> --to <account>` moves a whole group to another CLI login: each idle member in tmux quits (SIGTERM, as closing its terminal would) and resumes there, copied first, conversation and id kept. Busy members, members outside tmux, sessions with nothing said yet and firstmate's crews are left, each with what to do. The panel's session list has a group button on each row and a "move this group to" choice on each group.
+
 ## 0.8.2
 - `fm-pin` switches firstmate's accounts by group. The crews (the default) are pinned in firstmate's `config/claude-account` and now also in each second mate's own home, so the second mates' crews follow. `--group resident` (常驻) pins the second mates themselves through `config/secondmate-accounts/<id>/claude-account`; `--relaunch` relaunches the idle ones with firstmate's `bin/fm-control.sh` so they take it now, and busy ones are left with the command to run later. `fm-pin` without an account shows what each group uses. The panel's firstmate tool has a pin button for each group.
 - The mod's Move page: copy the desktop app's sessions into the account it is signed into now, from any other account and over 3 days, 7 days or all. The first press shows what would change, the second quits the app, copies (backup first) and opens it again; Undo the last move works the same way.

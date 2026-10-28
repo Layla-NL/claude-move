@@ -525,6 +525,32 @@ T = {
     "pp_live_sum": ("{n} running · {b} busy", "{n} 个在跑 · {b} 个在忙"),
     "pp_go": ("Go there", "过去"),
     "pp_pin": ("Pin to the top", "置顶"),
+    "gr_off": ("(not running)", "（没在跑）"),
+    "gr_none": ("No groups yet: claude-move group <name> <session>...", "还没有分组：claude-move group <组名> <会话>…"),
+    "gr_usage": ("Which sessions? claude-move group --out <session>...", "哪些会话？claude-move group --out <会话>…"),
+    "gr_nogroup": ("No group called {g}.", "没有叫“{g}”的组。"),
+    "gr_head": ("{g}{a}: {n} session(s)", "{g}{a}：{n} 个会话"),
+    "gr_on": (" (on {a})", "（用 {a}）"),
+    "gr_added": ("{w} is in {g} now.", "{w} 放进了“{g}”。"),
+    "gr_out": ("{w} is in no group now.", "{w} 已移出分组。"),
+    "gr_switching": ("{g} → {a}:", "“{g}”换到 {a}："),
+    "gr_same": ("  {w}: already on {a}", "  {w}：本来就在 {a}"),
+    "gr_ended": ("  {w}: not running; to go on there: {c}", "  {w}：没在跑；要在那边接着做：{c}"),
+    "gr_fm": ("  {w}: firstmate's crew, left as it is; firstmate's groups switch with claude-move fm-pin",
+              "  {w}：是 firstmate 的船员，没动；firstmate 的组用 claude-move fm-pin 换"),
+    "gr_busy": ("  {w}: busy, left as it is; switch again once it is idle", "  {w}：正在忙，没动；等它空了再换一次"),
+    "gr_notmux": ("  {w}: not in tmux, left as it is; quit it, then: {c}", "  {w}：不在 tmux 里，没动；退出它以后：{c}"),
+    "gr_would": ("  {w}: would quit and resume on {a}", "  {w}：会退出，再到 {a} 上接着做"),
+    "gr_empty": ("  {w}: nothing said in it yet, left as it is", "  {w}：还没聊过，没动"),
+    "gr_stuck": ("  {w}: did not quit within 20 s, left as it is", "  {w}：20 秒内没退出，没动"),
+    "gr_moved": ("  {w}: resumed on {a}", "  {w}：已到 {a} 上接着做"),
+    "gr_failed": ("  {w}: quit, but did not resume on {a}:", "  {w}：退出了，但没能在 {a} 上接着做："),
+    "pp_group": ("Group", "分组"),
+    "pp_group_ask": ("Group name (empty: take it out of its group)", "组名（留空就移出分组）"),
+    "pp_group_to": ("Move this group to", "这组换到"),
+    "pp_group_confirm": ("Move {g} to {a}? Idle sessions in tmux quit and resume there, conversation kept; busy ones are left as they are.",
+                         "把“{g}”换到 {a}？tmux 里空闲的会话会退出，再到那个号上接着做，对话不丢；正在忙的不动。"),
+    "pp_ungrouped": ("Not in a group", "未分组"),
     "pp_unpin": ("Unpin", "取消置顶"),
     "pp_resume": ("Resume", "接着做"),
     "pp_copy_cmd": ("Copy the command", "复制命令"),
@@ -1812,6 +1838,7 @@ ICONS = {  # 24x24 stroked paths for the page's buttons
     "sliders": '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
     "anchor": '<circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 10.5h8M4.5 13.5a7.5 7.5 0 0 0 15 0"/>',
     "pin": '<path d="M9 3.5h6l-1 6 3.5 3.5v2h-11v-2L10 9.5l-1-6z"/><path d="M12 15v5.5"/>',
+    "group": '<rect x="3.5" y="4.5" width="7" height="6" rx="1.5"/><rect x="13.5" y="4.5" width="7" height="6" rx="1.5"/><rect x="3.5" y="13.5" width="17" height="6" rx="1.5"/>',
     "flame": '<path d="M12 21a6.5 6.5 0 0 0 6.5-6.5c0-4-3-6-4-9.5-2 1.5-3 3.5-3 5.5-1-1-1.5-2-1.5-3.5-2.5 2-4.5 4.5-4.5 7.5A6.5 6.5 0 0 0 12 21z"/>',
 }
 
@@ -4909,6 +4936,7 @@ TMUX_MARK = ("# >>> claude-move", "# <<< claude-move")
 LABELS = CONF / "labels.json"
 PINS = CONF / "pins.json"
 LAST_MOVE = CONF / "last-move.json"
+GROUPS_F = CONF / "groups.json"
 
 
 def labels():
@@ -4927,6 +4955,37 @@ def pins():
     """Session ids the user pinned to the top of the running list, oldest pin first."""
     d = load(PINS)
     return [x for x in d if isinstance(x, str) and x] if isinstance(d, list) else []
+
+
+def groups():
+    """Groups the user made of their sessions: [{"name", "acct" (the account it was last switched to, or None), "sids"}]."""
+    d = load(GROUPS_F)
+    out = []
+    for g in d if isinstance(d, list) else []:
+        if isinstance(g, dict) and isinstance(g.get("name"), str) and g["name"].strip():
+            out.append({"name": g["name"], "acct": g["acct"] if isinstance(g.get("acct"), str) else None,
+                        "sids": [x for x in g.get("sids") or [] if isinstance(x, str) and x]})
+    return out
+
+
+def save_groups(gs):
+    CONF.mkdir(parents=True, exist_ok=True)
+    GROUPS_F.write_text(json.dumps([g for g in gs if g["sids"]], ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
+
+def set_group(sids, name):
+    """Put sessions in one group (a session is in one at most); an empty name takes them out. Empty groups go."""
+    gs = groups()
+    for g in gs:
+        g["sids"] = [x for x in g["sids"] if x not in sids]
+    name = " ".join(name.split())
+    if name:
+        g = next((g for g in gs if g["name"] == name), None)
+        if not g:
+            g = {"name": name, "acct": None, "sids": []}
+            gs.append(g)
+        g["sids"] += [x for x in sids if x not in g["sids"]]
+    save_groups(gs)
 
 
 def set_pin(sid, on):
@@ -5300,6 +5359,8 @@ def live_sessions(extra=()):
     """Claude Code sessions running now, from each CLI login's sessions/<pid>.json (Claude Code's own record of its
     running processes), with the tmux pane each runs in. Busy first, then the most recently active."""
     nm, panes, titles, lb, pin = names(), tmux_panes(), index_titles(), labels(), pins()
+    gs = groups()
+    member = {sid: g["name"] for g in gs for sid in g["sids"]}
     pp = parent_pids() if panes else {}
     out, seen = [], set()
     for cfg in cli_configs(extra):
@@ -5330,9 +5391,11 @@ def live_sessions(extra=()):
                         "title": str(title), "status": str(d.get("status") or ""),
                         "cwd": cwd, "project": short(Path(cwd)) if cwd else "", "started": (d.get("startedAt") or 0) / 1000,
                         "active": max(last, (d.get("updatedAt") or 0) / 1000), "rc": bool(d.get("bridgeSessionId")),
-                        "tmux": target, "pin": sid in pin})
+                        "tmux": target, "window": window, "pin": sid in pin, "group": member.get(sid, "")})
     order = {sid: i for i, sid in enumerate(pin)}  # pinned ones keep the order they were pinned in
-    return sorted(out, key=lambda r: (not r["pin"], order.get(r["sid"], 0), r["status"] != "busy", -r["active"]))
+    gi = {g["name"]: i for i, g in enumerate(gs)}  # then each group together, in the order they were made
+    return sorted(out, key=lambda r: (not r["pin"], order.get(r["sid"], 0), gi.get(r["group"], len(gs)),
+                                      r["status"] != "busy", -r["active"]))
 
 
 def status_text(s):
@@ -5515,8 +5578,117 @@ def cmd_ps(args):
     w = [max(wide(x) for x in col) for col in zip(*[(r["name"], status_text(r["status"]), r["tmux"] or "-") for r in rows])]
     for r in rows:
         cols = (r["name"], status_text(r["status"]), r["tmux"] or "-")
-        print("  " + "  ".join(c + " " * (n - wide(c)) for c, n in zip(cols, w)) + f'  {"📌 " * r["pin"]}{r["title"] or r["sid"][:8]} · {r["project"]}'
+        print("  " + "  ".join(c + " " * (n - wide(c)) for c, n in zip(cols, w)) + f'  {"📌 " * r["pin"]}{"[" + r["group"] + "] " if r["group"] else ""}{r["title"] or r["sid"][:8]} · {r["project"]}'
               + f'  ({ago(time.time() - r["started"])})' * bool(r["started"]))
+
+
+def stop_session(r, wait=20):
+    """Ask one Claude Code process to quit, as closing its terminal would (SIGTERM), once its own record still names
+    that pid and session. True when it is gone."""
+    import signal
+    rec = load(Path(r["cfg"]) / "sessions" / f'{r["pid"]}.json')
+    if WIN or not isinstance(rec, dict) or rec.get("sessionId") != r["sid"] or not pid_alive(r["pid"]):
+        return False
+    try:
+        os.kill(r["pid"], signal.SIGTERM)
+    except OSError:
+        return False
+    for _ in range(int(wait * 10)):
+        if not pid_alive(r["pid"]):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def group_switch(name, to_cfg, dry=False, extra=()):
+    """Put one group on another CLI login: each idle member in a tmux pane quits and resumes there (copied first, its
+    conversation and id kept); busy ones, ones outside tmux and firstmate's crews are left as they are."""
+    g = next((g for g in groups() if g["name"] == name), None)
+    if not g:
+        return False, t("gr_nogroup", g=name)
+    a = cli_account(to_cfg)
+    who = names().get(a, a[:8]) if a else short(to_cfg)
+    live = {r["sid"]: r for r in live_sessions(extra)}
+    lines = [t("gr_switching", g=name, a=who)]
+    for sid in g["sids"]:
+        r = live.get(sid)
+        w = (r["title"] or r["tmux"]) if r else sid[:8]
+        hint = f"claude-move resume {sid[:8]} --to {who}"
+        if not r:
+            same = next(Path(to_cfg).glob(f"projects/*/{sid}.jsonl"), None)  # moved there already
+            lines.append(t("gr_same", w=w, a=who) if same else t("gr_ended", w=w, c=hint))
+        elif Path(r["cfg"]).resolve() == Path(to_cfg).resolve():
+            lines.append(t("gr_same", w=w, a=who))
+        elif r["window"].startswith("fm-"):
+            lines.append(t("gr_fm", w=w))
+        elif r["status"] == "busy":
+            lines.append(t("gr_busy", w=w))
+        elif not r["tmux"]:
+            lines.append(t("gr_notmux", w=w, c=hint))
+        elif not next(Path(r["cfg"]).glob(f"projects/*/{sid}.jsonl"), None):  # nothing said yet: nothing to resume
+            lines.append(t("gr_empty", w=w))
+        elif dry:
+            lines.append(t("gr_would", w=w, a=who))
+        elif not stop_session(r):
+            lines.append(t("gr_stuck", w=w))
+        else:
+            ok, log = resume_session(Path(r["cfg"]), next(Path(r["cfg"]).glob(f"projects/*/{sid}.jsonl")), to_cfg=to_cfg,
+                                     extra=extra)
+            lines.append(t("gr_moved" if ok else "gr_failed", w=w, a=who))
+            lines += ["    " + x for x in log.splitlines()]
+    if dry:
+        lines.append(t("dry"))
+    else:
+        gs = groups()
+        for x in gs:
+            if x["name"] == name:
+                x["acct"] = a
+        save_groups(gs)
+    return True, "\n".join(lines)
+
+
+def cmd_group(args):
+    extra = args.config or ()
+    rows = live_sessions(extra)
+    if args.out:
+        toks = ([args.name] if args.name else []) + args.targets
+        if not toks:
+            sys.exit(t("gr_usage"))
+        for tok in toks:
+            r = ps_match(rows, tok)
+            sid = r["sid"] if r else next((x for g in groups() for x in g["sids"] if tok.strip() and x.startswith(tok.strip())), "")
+            if not sid:
+                sys.exit(t("ps_go_none", i=tok))
+            set_group([sid], "")
+            print(t("gr_out", w=(r["title"] or r["tmux"]) if r else sid[:8]))
+        return
+    if args.name and args.targets:
+        for tok in args.targets:
+            r = ps_match(rows, tok)
+            if not r:
+                sys.exit(t("ps_go_none", i=tok))
+            set_group([r["sid"]], args.name)
+            print(t("gr_added", w=r["title"] or r["tmux"] or r["sid"][:8], g=" ".join(args.name.split())))
+        return
+    if args.name and args.to:
+        cfg = cli_dir(args.to.strip(), extra)
+        if not cfg:
+            sys.exit(t("t_none", t=args.to))
+        ok, log = group_switch(args.name, cfg, args.dry_run, extra)
+        if not ok:
+            sys.exit(log)
+        print(log)
+        return
+    gs = [g for g in groups() if not args.name or g["name"] == args.name]
+    if not gs:
+        sys.exit(t("gr_nogroup", g=args.name) if args.name else t("gr_none"))
+    live, nm = {r["sid"]: r for r in rows}, names()
+    for g in gs:
+        print(t("gr_head", g=g["name"], n=len(g["sids"]), a=t("gr_on", a=nm.get(g["acct"], g["acct"][:8])) if g["acct"] else ""))
+        for sid in g["sids"]:
+            r = live.get(sid)
+            print(f'  {"●" if r and r["status"] == "busy" else "○" if r else "-"} {r["name"] if r else "":8} '
+                  f'{(r["title"] or r["tmux"]) if r else sid[:8] + " " + t("gr_off")}')
 
 
 def cmd_tmux(args):
@@ -5803,7 +5975,14 @@ def panel_api(method, path, q, body, extra=()):
                 cli = []
             return 200, {"sessions": sorted(out, key=lambda x: x["last"], reverse=True)[:40], "cli": cli}
         if name == "live":
+            logins = {}
+            for c in cli_configs(extra):
+                a = cli_account(c)
+                if a and a not in logins:
+                    logins[a] = names().get(a, a[:8])
             return 200, {"rows": live_sessions(extra), "tmux": bool(tmux("list-sessions")), "has_tmux": bool(tmux_bin()),
+                         "groups": [{"name": g["name"], "acct": g["acct"]} for g in groups()],
+                         "logins": [{"acct": a, "name": n} for a, n in logins.items()],
                          "conf": tmux_conf_on(), "block": tmux_conf_block(), "path": short(TMUX_CONF)}
         if name == "cli-sessions":
             if not cfg or cfg.resolve() == DESKTOP_HOME.resolve():
@@ -5979,6 +6158,21 @@ def panel_api(method, path, q, body, extra=()):
                 return bad
             set_pin(sid, bool(body.get("on")))
             return 200, {"ok": True, "log": t("ps_pinned" if body.get("on") else "ps_unpinned", w=r["title"] or r["sid"][:8])}
+        if do == "group":
+            sid, gname = str(body.get("sid") or ""), " ".join(str(body.get("name") or "").split())[:60]
+            r = next((r for r in live_sessions(extra) if sid and r["sid"] == sid), None)
+            if not r:
+                return bad
+            set_group([sid], gname)
+            w = r["title"] or r["sid"][:8]
+            return 200, {"ok": True, "log": t("gr_added", w=w, g=gname) if gname else t("gr_out", w=w)}
+        if do == "switch":
+            gname = str(body.get("name") or "")
+            to = cli_dir(acct, extra) if acct else None
+            if not to or cli_account(to) != acct or gname not in {g["name"] for g in groups()}:
+                return bad
+            ok, log = group_switch(gname, to, extra=extra)
+            return 200, {"ok": ok, "log": log}
         if do == "name":
             if not tmux("list-sessions"):
                 return 200, {"ok": False, "log": t("tm_none")}
@@ -6011,7 +6205,10 @@ TOOLS_CSS = """
 .live .item .st{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--dim);flex:none;margin:0 4px}
 .live .item.busy .st{background:var(--hot);border-color:var(--hot)}
 .live .item .t{flex:1;min-width:0} .live .item b{min-width:64px}
-.live .item .ib.pin:not([aria-pressed="true"]){opacity:.35} .live .item:hover .ib.pin{opacity:1}
+.live .item .ib.pin:not([aria-pressed="true"]),.live .item .ib.grp:not([aria-pressed="true"]){opacity:.35}
+.live .item:hover .ib.pin,.live .item:hover .ib.grp{opacity:1}
+.live .item.ghead{border-top:1px solid var(--hair);padding-top:10px} .live .item.ghead b{flex:1}
+.live .item.ghead select{font:inherit;font-size:12px;border-radius:8px;border:1px solid var(--hair);background:var(--raise);color:var(--ink);padding:3px 6px}
 .live .item.pinned+.item:not(.pinned){border-top:1px solid var(--hair)}
 .list{max-height:340px;overflow:auto;margin:8px 0}
 .item{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;padding:6px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}
@@ -6231,7 +6428,27 @@ async function loadLive() {
   box.innerHTML = "";
   $("lv-sum").textContent = fmt(TT.pp_live_sum, {n: rows.length, b: rows.filter(x => x.status === "busy").length});
   if (!rows.length) empty(box, TT.ps_none);
+  let seen = null;
+  const head = g => {  // a group's heading, with the account it moves to
+    const h = el("div", {className: "item ghead"}, el("b", {textContent: g || TT.pp_ungrouped}));
+    if (g && r.logins && r.logins.length > 1) {
+      const sel = el("select", {});
+      sel.append(el("option", {value: "", textContent: TT.pp_group_to + "…"}));
+      r.logins.forEach(l => sel.append(el("option", {value: l.acct, textContent: l.name})));
+      sel.onchange = async () => {
+        const l = r.logins.find(l => l.acct === sel.value);
+        if (!l || !confirm(fmt(TT.pp_group_confirm, {g, a: l.name}))) { sel.value = ""; return; }
+        say("lv-log", TT.p_working);
+        say("lv-log", (await post("live", {do: "switch", name: g, acct: l.acct})).log);
+        loadLive();
+      };
+      h.append(sel);
+    }
+    return h;
+  };
+  const grouped = rows.some(x => x.group);
   rows.forEach(x => {
+    if (grouped && !x.pin && x.group !== seen) { seen = x.group; box.append(head(x.group)); }
     const st = el("span", {className: "st"});
     st.dataset.tip = TT["ps_" + x.status] || x.status;
     const row = el("div", {className: "item" + (x.status === "busy" ? " busy" : "") + (x.pin ? " pinned" : "")}, st, el("b", {textContent: x.name}),
@@ -6242,6 +6459,16 @@ async function loadLive() {
     pb.setAttribute("aria-pressed", x.pin ? "true" : "false");
     pb.onclick = async () => { say("lv-log", (await post("live", {do: "pin", sid: x.sid, on: !x.pin})).log); loadLive(); };
     row.append(pb);
+    const gb = el("button", {className: "ib grp", type: "button", innerHTML: '<svg class="i" aria-hidden="true"><use href="#i-group"/></svg>'});
+    gb.dataset.tip = TT.pp_group + (x.group ? " · " + x.group : "");
+    gb.setAttribute("aria-pressed", x.group ? "true" : "false");
+    gb.onclick = async () => {
+      const g = prompt(TT.pp_group_ask, x.group || "");
+      if (g === null) return;
+      say("lv-log", (await post("live", {do: "group", sid: x.sid, name: g})).log);
+      loadLive();
+    };
+    row.append(gb);
     if (x.tmux) {
       const b = el("button", {className: "ib", type: "button", innerHTML: '<svg class="i" aria-hidden="true"><use href="#i-term"/></svg>'});
       b.dataset.tip = TT.pp_go + " · " + x.tmux;
@@ -6276,7 +6503,8 @@ TOOLS_KEYS = ("p_working", "no_backups", "pt_move_confirm", "pt_undo_btn", "pt_u
               "pt_rename_ask", "pt_rec_confirm", "pt_login_ask", "pt_crew_pin", "pt_crew_pinned", "pt_crew_pin_confirm",
               "pt_crew_sched_on", "pt_crew_sched_off", "ps_none", "ps_busy", "ps_idle", "pp_live_sum", "pp_go",
               "pp_pin", "pp_unpin", "pp_tm_conf_on", "pp_tm_conf_off", "pp_tm_conf_confirm",
-              "pt_mate_pin", "pt_mate_pinned", "pt_mate_pin_confirm")
+              "pt_mate_pin", "pt_mate_pinned", "pt_mate_pin_confirm", "pp_group", "pp_group_ask", "pp_group_to",
+              "pp_group_confirm", "pp_ungrouped")
 
 
 def tools_html():
@@ -6471,6 +6699,16 @@ def main(argv=None):
     ps.add_argument("--json", action="store_true", help="print them as JSON")
     ps.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
     ps.set_defaults(fn=cmd_ps)
+    gp = sub.add_parser("group", help="your own groups of terminal sessions: list them, put sessions in one, "
+                                      "or move a whole group to another account (idle ones restart there)")
+    gp.add_argument("name", nargs="?", help="the group (made when the first session goes in)")
+    gp.add_argument("targets", nargs="*", metavar="TARGET", help="sessions to put in it: tmux target, id prefix or pid")
+    gp.add_argument("--to", metavar="ACCOUNT", help="move the group to this account: each idle member in tmux quits and "
+                                                   "resumes there, conversation and id kept; busy ones are left")
+    gp.add_argument("--out", action="store_true", help="take the TARGETs (NAME counts as one) out of their group")
+    gp.add_argument("--dry-run", action="store_true", help="with --to: say what would happen, change nothing")
+    gp.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
+    gp.set_defaults(fn=cmd_group)
     tx = sub.add_parser("tmux", help="tmux and Claude: `name` names windows after their session, `line` is the status bar text, "
                                      "`menu` a session menu, `conf` the ~/.tmux.conf block that wires them up")
     tx.add_argument("action", nargs="?", default="name", choices=("name", "line", "menu", "conf"))

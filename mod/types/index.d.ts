@@ -8,6 +8,7 @@ export type LiveRow = {
   project: string
   tmux: string
   pin: boolean
+  group: string
 }
 
 // One official meter, as `claude-move usage --json` prints it.
