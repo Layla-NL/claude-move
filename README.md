@@ -279,16 +279,24 @@ what was there first in `~/.config/claude-move/run-backups`), so it stays one li
 in one place at a time. Copies are never merged and claude-move deletes none of them.
 
 Every copy claude-move makes is written to `~/.config/claude-move/moves.jsonl`: when, which session, from and to
-which account or folder, its size, and where what it replaced was saved.
+which account or folder, its size, and where what it replaced was saved. Archiving, putting back and deleting are
+written there too.
 
 ```bash
 claude-move dupes                    # sessions kept in more than one folder, what the copies and the backups take
 claude-move trail d767de1f           # one session: its copies now, the desktop lists holding it, its moves, older versions
 claude-move dupes --max-copies 2 --max-mb 1024   # the limits the panel warns at
+claude-move dupes --archive d767de1f outlook     # put the copy in outlook's folder aside (it can be put back)
+claude-move dupes --restore <id>                 # put an archived copy back
+claude-move dupes --delete <id>                  # delete an archived copy, or one of claude-move's backup sets, for good
 ```
 
-Past a limit the panel shows a warning at the top; its Copies tool lists the copies and shows each session's
-trail. Claude Code itself clears transcripts older than `cleanupPeriodDays` (30 days by default) in each folder.
+Past a limit the panel shows a warning at the top. Its Copies tool sets the limits, lists the copies with each
+session's trail, archives a copy, puts one back, and deletes archived copies and claude-move's own backup sets.
+Archiving moves a copy into `~/.config/claude-move/archive`; it is refused for the newest copy of a session, for a
+copy a running session uses, and for the copy in `~/.claude` a desktop list still opens. Only archived copies and
+claude-move's backups can be deleted, each after a confirmation; deleting a desktop move's backup means that move
+can no longer be undone. Claude Code itself clears transcripts older than `cleanupPeriodDays` (30 days by default) in each folder.
 
 ### Codex
 
@@ -456,9 +464,12 @@ claude-move 每拷一次，都记进 `~/.config/claude-move/moves.jsonl`：什�
 claude-move dupes                    # 哪些会话在不止一个文件夹里有副本，副本和备份各占多少
 claude-move trail d767de1f           # 一个会话：现在的副本、哪些桌面列表里有它、搬过的路径、旧版本
 claude-move dupes --max-copies 2 --max-mb 1024   # 面板提示的上限
+claude-move dupes --archive d767de1f outlook     # 把 outlook 文件夹里那份归档（能恢复）
+claude-move dupes --restore <id>                 # 恢复一份归档
+claude-move dupes --delete <id>                  # 彻底删除一份归档，或 claude-move 的一组备份
 ```
 
-超过上限时面板顶部会出提示；工具栏的“副本”列出所有副本，每个会话都能看轨迹。Claude Code 自己会按 `cleanupPeriodDays`（默认 30 天）清掉各文件夹里的旧记录。
+超过上限时面板顶部会出提示。工具栏的“副本”里可以改上限、看所有副本和每个会话的轨迹、归档、恢复，以及删除已归档的副本和 claude-move 自己的备份。归档是把那份挪进 `~/.config/claude-move/archive`；会话最新的那份、正在跑的会话用的那份、桌面列表还要靠它打开的 `~/.claude` 那份都不能归档。只有归档的副本和 claude-move 的备份能删，每次都要确认；删掉桌面迁移的备份，那次迁移就不能撤回了。归档、恢复、删除也都记进轨迹。Claude Code 自己会按 `cleanupPeriodDays`（默认 30 天）清掉各文件夹里的旧记录。
 
 **Codex：** Codex 的登录和 Claude 的放在一起管。Codex 没有按号分开的会话列表，所以不搬会话，别的都一样。每个 Codex 文件夹（`~/.codex`，以及通过 `CODEX_HOME` 用的另一个登录 `~/.codex-<名字>`）只读它的会话记录：每个会话是哪个号跑的（`creator_account_id`），以及 Codex 一边跑一边写下的官方额度（`rate_limits`：本周和 5 小时窗口、套餐、credits）。从不打开它的 `auth.json`。
 

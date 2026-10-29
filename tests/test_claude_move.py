@@ -834,6 +834,43 @@ class Terminal(unittest.TestCase):
         self.assertEqual(c["rows"][0]["sid"], self.S1)
         self.assertIn("first -> second", api("trail?sid=" + self.S1)["log"])
         self.assertEqual(Panel.call(self, "/api/trail?sid=../x")[0], 400)
+        # the limits are set there too
+        post = lambda body: json.loads(Panel.call(self, "/api/copies", body)[1])
+        self.assertTrue(post({"do": "limits", "copies": 3, "mb": 500})["ok"])
+        self.assertEqual(json.loads((self.home / ".config/claude-move/copies.json").read_text(encoding="utf-8")), {"copies": 3, "mb": 500.0})
+        self.assertEqual(Panel.call(self, "/api/copies", {"do": "limits", "copies": 0, "mb": 5})[0], 400)
+        # the newest copy stays; an older one goes to the archive, comes back, goes again and is deleted for good
+        theirs = self.second / "projects/-proj" / f"{self.S1}.jsonl"
+        os.utime(theirs, (time.time(), time.time()))
+        self.assertFalse(post({"do": "archive", "sid": self.S1, "dir": str(self.second)})["ok"])  # the newest
+        self.assertEqual(Panel.call(self, "/api/copies", {"do": "archive", "sid": self.S1, "dir": "/tmp"})[0], 400)
+        self.assertTrue(post({"do": "archive", "sid": self.S1, "dir": str(self.first)})["ok"])
+        self.assertFalse(self.t1.exists())
+        c = api("copies")
+        self.assertEqual([a["sid"] for a in c["archived"]], [self.S1])
+        self.assertTrue(post({"do": "restore", "id": c["archived"][0]["id"]})["ok"])
+        self.assertTrue(self.t1.exists())
+        r = self.run_tool("dupes", "--archive", self.S1[:8], "first", **env)
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        aid = api("copies")["archived"][0]["id"]
+        self.assertEqual(Panel.call(self, "/api/copies", {"do": "delete", "kind": "archive", "id": "../x"})[0], 400)
+        self.assertTrue(post({"do": "delete", "kind": "archive", "id": aid})["ok"])
+        self.assertEqual(api("copies")["archived"], [])
+        run_set = api("copies")["sets"][0]
+        self.assertEqual(run_set["kind"], "run")
+        self.assertTrue(post({"do": "delete", "kind": "run", "id": run_set["id"]})["ok"])
+        out = self.run_tool("trail", self.S1[:8], **env).stdout
+        for word in ("archived", "put back", "deleted"):
+            self.assertIn(word, out)
+        self.assertTrue(theirs.exists(), "the newest copy is never touched")
+        # a desktop list still opens its copy in ~/.claude: that one stays, even when a CLI login has a newer copy
+        mine = self.first / "projects/-p/s1.jsonl"
+        mine.parent.mkdir(parents=True)
+        shutil.copy(self.transcript, mine)
+        r = self.run_tool("dupes", "--archive", "s1", "desktop", **env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("desktop app's list opens this copy", r.stdout)
+        self.assertTrue(self.transcript.exists())
 
     def test_find_reads_what_was_said_and_resume_opens_it(self):
         self.prepare()
