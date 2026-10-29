@@ -270,6 +270,26 @@ export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # in fi
   week left and the `fm-pin` command for it. Nothing switches crews on its own: firstmate leaves that file to its
   captain, and rotating accounts automatically is the kind of use Anthropic's terms may not allow.
 
+### Copies and their trail
+
+A desktop session has one history: every desktop account reads the same transcript in `~/.claude`, and a move only
+copies the small list entry that points to it. A terminal session moved to another login (`resume --to`, `run`,
+moving a group) is copied whole into that login's folder; each move copies the newest over the copy there (saving
+what was there first in `~/.config/claude-move/run-backups`), so it stays one line of history as long as you go on
+in one place at a time. Copies are never merged and claude-move deletes none of them.
+
+Every copy claude-move makes is written to `~/.config/claude-move/moves.jsonl`: when, which session, from and to
+which account or folder, its size, and where what it replaced was saved.
+
+```bash
+claude-move dupes                    # sessions kept in more than one folder, what the copies and the backups take
+claude-move trail d767de1f           # one session: its copies now, the desktop lists holding it, its moves, older versions
+claude-move dupes --max-copies 2 --max-mb 1024   # the limits the panel warns at
+```
+
+Past a limit the panel shows a warning at the top; its Copies tool lists the copies and shows each session's
+trail. Claude Code itself clears transcripts older than `cleanupPeriodDays` (30 days by default) in each folder.
+
 ### Codex
 
 Codex logins sit beside the Claude ones. Codex keeps no per-account session list, so nothing is moved; the rest is
@@ -427,6 +447,18 @@ export QUOTA_AXI_SNAPSHOT=~/.cache/claude-move/quota-axi-snapshot.json   # 写�
 - 保鲜：定时任务每次问这个登录的 `/usage`（不耗额度），别的登录每小时问一次。这个登录装了状态栏记录器的话，船员干活时也会顺手更新，最多一分钟一次。quota-axi 在窗口重置前都把快照当新的用，所以 `/usage` 连续失败一小时（退出登录、电脑睡太久），文件会挪成 `….stale`：firstmate 看到的是“没有 Claude 额度数据”，而不是旧数。没有官方数据时什么都不写，命令非零退出。
 - 每次写入记在 `~/.cache/claude-move/quota-snapshot.log`（账号、两个百分比、`refreshedAt`）。
 - 换号还是你来：船员用的号过 90%、95% 时，通知会写出本周剩得最多的号和对应的 `fm-pin` 命令。不会自动给船员换号：firstmate 规定这个文件只由船长改，而且自动轮换几个号，Anthropic 的条款未必允许。
+
+**副本和轨迹：** 桌面会话只有一份历史：所有桌面账号读的是 `~/.claude` 里同一份记录，迁移只拷指向它的那张列表卡片。终端会话换到另一个登录（`resume --to`、`run`、整组换号）时，会整份拷进那个登录的文件夹；每次都用最新的那份覆盖那边的旧副本（覆盖前存到 `~/.config/claude-move/run-backups`），所以只要同一时间只在一边接着聊，历史就还是一条线。副本不会自动合并，claude-move 也一个都不删。
+
+claude-move 每拷一次，都记进 `~/.config/claude-move/moves.jsonl`：什么时候、哪个会话、从哪个号或文件夹到哪个、多大、被覆盖的那份存在哪。
+
+```bash
+claude-move dupes                    # 哪些会话在不止一个文件夹里有副本，副本和备份各占多少
+claude-move trail d767de1f           # 一个会话：现在的副本、哪些桌面列表里有它、搬过的路径、旧版本
+claude-move dupes --max-copies 2 --max-mb 1024   # 面板提示的上限
+```
+
+超过上限时面板顶部会出提示；工具栏的“副本”列出所有副本，每个会话都能看轨迹。Claude Code 自己会按 `cleanupPeriodDays`（默认 30 天）清掉各文件夹里的旧记录。
 
 **Codex：** Codex 的登录和 Claude 的放在一起管。Codex 没有按号分开的会话列表，所以不搬会话，别的都一样。每个 Codex 文件夹（`~/.codex`，以及通过 `CODEX_HOME` 用的另一个登录 `~/.codex-<名字>`）只读它的会话记录：每个会话是哪个号跑的（`creator_account_id`），以及 Codex 一边跑一边写下的官方额度（`rate_limits`：本周和 5 小时窗口、套餐、credits）。从不打开它的 `auth.json`。
 

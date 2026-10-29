@@ -93,9 +93,14 @@ class ClaudeMove(unittest.TestCase):
     def test_moves_recent_live_only_and_backs_up(self):
         r = self.run_tool("to", "bbbb")
         self.assertEqual(r.returncode, 0, r.stderr)
+        moves = [json.loads(x) for x in (self.home / ".config/claude-move/moves.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(m["kind"], m["sid"], m["src"], m["dst"]) for m in moves], [("desktop", "local_1", "aaaa1111", "bbbb2222")])
+        self.assertIn("desktop list  aaaa1111 -> bbbb2222", self.run_tool("trail", "local_1").stdout)
         self.assertEqual(sorted(p.name for p in self.b.iterdir()), ["local_1.json"])
         self.assertTrue(any((self.root.parent / "claude-code-sessions-backups").iterdir()))
         self.assertTrue((self.a / "local_1.json").exists(), "source must never be deleted")
+        self.assertEqual(self.run_tool("undo").returncode, 0)
+        self.assertIn("undo", self.run_tool("trail", "local_1").stdout)  # the trail keeps the undo too
 
     def test_all_includes_old_but_not_archived(self):
         self.run_tool("to", "bbbb", "--all")
@@ -798,6 +803,37 @@ class Terminal(unittest.TestCase):
         self.assertEqual(Panel.call(self, "/api/live", {"do": "switch", "name": "nope", "acct": self.a})[0], 400)
         self.assertEqual(Panel.call(self, "/api/live", {"do": "switch", "name": "b", "acct": "nobody"})[0], 400)
         self.assertIn("busy, left as it is", api("live", {"do": "switch", "name": "b", "acct": self.a})["log"])
+
+    def test_copies_their_trail_and_the_limit(self):
+        self.prepare()
+        env = dict(CLAUDE_MOVE_TMUX="0", CLAUDE_MOVE_TERM_CMD=NOOP)
+        self.assertIn("0 terminal session(s)", self.run_tool("dupes", **env).stdout)
+        self.assertEqual(self.run_tool("resume", self.S1[:8], "--to", "second", **env).returncode, 0)
+        rep = json.loads(self.run_tool("dupes", "--json", **env).stdout)
+        self.assertEqual([(r["sid"], sorted(c["name"] for c in r["copies"])) for r in rep["rows"]], [(self.S1, ["first", "second"])])
+        self.assertEqual(rep["extra"], self.t1.stat().st_size)
+        self.assertEqual(rep["over"], [])
+        # again, onto the copy there: what was there is saved first, and the trail says where
+        self.assertEqual(self.run_tool("resume", self.S1[:8], "--to", "second", **env).returncode, 0)
+        out = self.run_tool("trail", self.S1[:8], **env).stdout
+        self.assertIn("Copies now (2", out)
+        self.assertIn("Copies claude-move made (2)", out)
+        self.assertIn("terminal  first -> second", out)
+        self.assertIn("run-backups", out)
+        self.assertIn("Older versions kept in backups (1)", out)
+        self.assertNotEqual(self.run_tool("trail", "ffffffff", **env).returncode, 0)
+        # past the limit: the panel says so, and its tool lists the copies and shows a trail
+        r = self.run_tool("dupes", "--max-copies", "1", **env)
+        self.assertIn("1 session(s) are in more than 1 folders", r.stdout)
+        Panel.start(self, **env)
+        page = Panel.call(self, f"/?t={self.token}", token=False)[1]
+        self.assertIn('class="panel warnbar"', page)
+        self.assertIn("data-open=t-copies", page)
+        api = lambda name: json.loads(Panel.call(self, "/api/" + name)[1])
+        c = api("copies")
+        self.assertEqual(c["rows"][0]["sid"], self.S1)
+        self.assertIn("first -> second", api("trail?sid=" + self.S1)["log"])
+        self.assertEqual(Panel.call(self, "/api/trail?sid=../x")[0], 400)
 
     def test_find_reads_what_was_said_and_resume_opens_it(self):
         self.prepare()
