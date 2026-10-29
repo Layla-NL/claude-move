@@ -44,7 +44,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-__version__ = "0.8.3"
+__version__ = "0.8.4"
 
 WIN = sys.platform == "win32"
 HOME = Path(os.environ.get("CLAUDE_MOVE_HOME", str(Path.home())))
@@ -541,6 +541,59 @@ T = {
     "gr_busy": ("  {w}: busy, left as it is; switch again once it is idle", "  {w}：正在忙，没动；等它空了再换一次"),
     "gr_notmux": ("  {w}: not in tmux, left as it is; quit it, then: {c}", "  {w}：不在 tmux 里，没动；退出它以后：{c}"),
     "gr_would": ("  {w}: would quit and resume on {a}", "  {w}：会退出，再到 {a} 上接着做"),
+    "cp_desk": ("desktop app", "桌面 App"),
+    "cp_head": ("{n} terminal session(s) are kept in more than one folder; the extra copies take {m} (* the newest)",
+                "{n} 个终端会话在不止一个文件夹里有副本，多出来的占 {m}（* 是最新的那份）"),
+    "cp_extra": ("extra {m}", "多占 {m}"),
+    "cp_backups": ("claude-move's backups: {r} before terminal copies ({rp}), {d} before desktop moves ({dp})",
+                   "claude-move 的备份：终端换号前留的 {r}（{rp}），桌面迁移前留的 {d}（{dp}）"),
+    "cp_limits": ("The panel warns past {c} copies of one session, or {m} MB of extra copies or of backups (claude-move dupes --max-copies N --max-mb MB).",
+                  "面板提示的上限：一个会话超过 {c} 份，或者多出来的副本、备份超过 {m} MB（claude-move dupes --max-copies N --max-mb MB 改）。"),
+    "cp_over_n": ("{n} session(s) are in more than {c} folders", "{n} 个会话的副本超过 {c} 份"),
+    "cp_over_mb": ("extra copies take {m} MB, past {l} MB", "多出来的副本占了 {m} MB，超过 {l} MB"),
+    "cp_over_bk": ("claude-move's backups take {m} MB, past {l} MB", "claude-move 的备份占了 {m} MB，超过 {l} MB"),
+    "cp_hint": ("claude-move deletes none of them; claude-move trail <id> shows where one came from. Claude Code clears transcripts older than its cleanupPeriodDays (30 by default) in each folder.",
+                "这些 claude-move 一个都不删；claude-move trail <id> 看某个会话是怎么来的。Claude Code 会按 cleanupPeriodDays（默认 30 天）清掉各文件夹里的旧记录。"),
+    "cp_warn": ("Copies past the limit", "副本超过上限"),
+    "pp_d_copies": ("Copies", "副本"),
+    "pt_copies": ("Sessions kept in several folders, what they take, and each one's trail", "在几个文件夹里都有的会话、占多少，以及每个会话的轨迹"),
+    "pt_trail": ("Trail", "轨迹"),
+    "tr_head": ("Session {i}", "会话 {i}"),
+    "tr_copies": ("Copies now ({n}; * the newest):", "现在的副本（{n} 份；* 是最新的）："),
+    "tr_desk": ("In the desktop app's list of: {l}", "在这些号的桌面 App 列表里：{l}"),
+    "tr_moves": ("Copies claude-move made ({n}):", "claude-move 做过的拷贝（{n} 次）："),
+    "tr_none": ("none recorded (claude-move records them from 0.8.4 on)", "没有记录（claude-move 从 0.8.4 起才记）"),
+    "tr_older": ("Older versions kept in backups ({n}):", "备份里留着的旧版本（{n} 份）："),
+    "tr_saved": ("what was there saved to {p}", "原来那份存到了 {p}"),
+    "tr_kind_terminal": ("terminal", "终端换号"),
+    "tr_kind_desktop": ("desktop list", "桌面列表"),
+    "tr_kind_import": ("into ~/.claude", "拷进 ~/.claude"),
+    "tr_kind_undo": ("undo", "撤回"),
+    "tr_kind_None": ("?", "?"),
+    "tr_kind_archive": ("archived", "归档"),
+    "tr_kind_restore": ("put back", "恢复"),
+    "tr_kind_delete": ("deleted", "删除"),
+    "ar_none": ("Nothing like that to act on.", "找不到要操作的那一份。"),
+    "ar_newest": ("That is the newest copy of the session; it stays.", "这是这个会话最新的一份，不能归档。"),
+    "ar_running": ("The session is running from that folder; it stays.", "这个会话正在用这份跑，不能归档。"),
+    "ar_desk": ("The desktop app's list opens this copy in ~/.claude; it stays.", "桌面 App 的列表要靠 ~/.claude 里这份打开，不能归档。"),
+    "ar_done": ("Archived the copy in {w} to {p}; it can be put back.", "已把 {w} 里那份归档到 {p}，随时能恢复。"),
+    "ar_taken": ("Something is at {p} again; it was not put back.", "{p} 那里又有文件了，没有恢复。"),
+    "ar_restored": ("Put back at {p}.", "已恢复到 {p}。"),
+    "ar_deleted": ("Deleted {p} ({m}) for good.", "已彻底删除 {p}（{m}）。"),
+    "ar_head": ("Archived copies ({n}):", "已归档的副本（{n} 份）："),
+    "ar_sets": ("claude-move's backup sets ({n}):", "claude-move 的备份（{n} 组）："),
+    "pt_archive": ("Archive", "归档"),
+    "pt_restore": ("Put back", "恢复"),
+    "pt_delete": ("Delete", "删除"),
+    "pt_archive_ask": ("Archive this copy? It moves to claude-move's archive and can be put back.", "归档这一份？它会挪到 claude-move 的归档里，随时能恢复。"),
+    "pt_delete_ask": ("Delete {p} for good? This cannot be undone.", "彻底删除 {p}？删了就找不回来。"),
+    "pt_delete_desk": ("Delete {p} for good? The move it was made for can no longer be undone.", "彻底删除 {p}？删了以后，那次迁移就不能撤回了。"),
+    "pt_limits": ("Warn past", "上限"),
+    "pt_limit_copies": ("copies of one session", "份（每个会话）"),
+    "pt_limit_mb": ("MB of extra copies or backups", "MB（多出来的副本或备份）"),
+    "pt_set_run": ("before a terminal copy", "终端换号前"),
+    "pt_set_desk": ("before a desktop move", "桌面迁移前"),
     "cx_term_tip": ("Open Codex with this login", "用这个登录打开 Codex"),
     "cx_title": ("Codex accounts: official % from the rate limits Codex writes in its own session files",
                  "Codex 账号：官方百分比取自 Codex 自己写在会话记录里的额度"),
@@ -884,8 +937,10 @@ def cmd_to(args):
                 "added": [tg.name for _, tg, _ in plan if not tg.exists()]}
     (bk / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(t("backed", p=bk))
-    for f, target, _ in plan:
+    for f, target, d in plan:
         shutil.copy2(f, target)
+        journal(kind="desktop", sid=d.get("cliSessionId") or d.get("sessionId"), entry=f.name, src=src["acct"],
+                dst=dst["acct"], title=d.get("title") or "", backup=str(bk))
     print(t("done", n=len(plan)))
 
 
@@ -934,6 +989,7 @@ def cmd_undo(args):
     if app_running():
         sys.exit(t("running"))
     snap = BACKUPS / f"{time.strftime('%Y%m%d-%H%M%S')}-{m.get('account', 'x')[:8]}-before-undo"
+    sid_of = {n: (load(target / n) or {}) for n in replaced + added}  # read before anything changes, for the trail
     shutil.copytree(target, snap)
     for n in replaced:
         shutil.copy2(bk / n, target / n)
@@ -941,6 +997,10 @@ def cmd_undo(args):
         (target / n).unlink()
     m["undone"] = int(time.time())
     (bk / MANIFEST).write_text(json.dumps(m, indent=2) + "\n", encoding="utf-8")
+    for n, d in sid_of.items():
+        d = d if isinstance(d, dict) else {}
+        journal(kind="undo", sid=d.get("cliSessionId") or d.get("sessionId") or n, entry=n, dst=m.get("account", ""),
+                backup=str(bk), before=str(snap))
     print(t("undo_done", p=snap))
 
 
@@ -1041,6 +1101,7 @@ def import_one(f, dst_cfg):
     side = f.parent / f.stem
     if side.is_dir() and not (ddir / f.stem).exists():
         shutil.copytree(side, ddir / f.stem)
+    journal(kind="import", sid=f.stem, src=str(f.parents[2]), dst=str(dst_cfg), bytes=f.stat().st_size)
     return True
 
 
@@ -2026,6 +2087,11 @@ def render_html(rep, live=None):
                f'<button class="ib raised lang" type="button" id="lang" data-to="{"en" if ZH else "zh"}" data-tip="{tip(t("pp_lang_tip"))}">{E(t("pp_lang_to"))}</button>'
                if live else "")
     found = '<section class="panel found" id="found" hidden></section>' if live else ""
+    if live and not live.get("demo"):
+        over = copies_report().get("over")
+        if over:
+            found += (f'<section class="panel warnbar" role="status">{icon("info")}<b>{E(t("cp_warn"))}</b>'
+                      f'<span>{E("; ".join(over))}</span><button class="ghost" type="button" data-open="t-copies">{E(t("pp_d_copies"))}</button></section>')
     nxt = []
     for r in rep["rows"]:
         marks = [{"k": row_label(x), "p": round(x.get("percent") or 0), "at": x["resets_at"]}
@@ -2050,6 +2116,7 @@ def render_html(rep, live=None):
                 ("t-upd", "update", "pp_d_upd", "pt_update")]
         if is_firstmate(FM_HOME):
             dock.insert(-2, ("t-crew", "anchor", "pp_d_crew", "pt_crew_tip"))
+        dock.insert(3, ("t-copies", "copy", "pp_d_copies", "pt_copies"))
         tools = "".join(f'<button class="tool" type="button" {f"data-open={q}" if q else "id=dock-login"} aria-pressed="false" '
                         f'data-tip="{tip(t(k2))}">{icon(ic)}{E(t(k))}</button>' for q, ic, k, k2 in dock)
         bottom = f'<section class="panel dock"><div class="tools">{tools}</div><div class="legend">{ramp}</div>{tools_html()}</section>'
@@ -4878,6 +4945,7 @@ def copy_session(src_cfg, dst_cfg, sid):
     side = src.parent / sid
     if side.is_dir():
         shutil.copytree(side, ddir / sid, dirs_exist_ok=True)
+    journal(kind="terminal", sid=sid, src=str(src_cfg), dst=str(dst_cfg), bytes=src.stat().st_size, backup=str(bk) if bk else None)
     return bk
 
 
@@ -4990,6 +5058,9 @@ LABELS = CONF / "labels.json"
 PINS = CONF / "pins.json"
 LAST_MOVE = CONF / "last-move.json"
 GROUPS_F = CONF / "groups.json"
+MOVES = CONF / "moves.jsonl"  # every copy claude-move made, one line each: the trail of each session
+COPIES = CONF / "copies.json"  # when the panel says there are too many copies
+ARCHIVE = CONF / "archive"  # copies the user put aside, each in a folder of its own with where it came from
 
 
 def labels():
@@ -5039,6 +5110,218 @@ def set_group(sids, name):
             gs.append(g)
         g["sids"] += [x for x in sids if x not in g["sids"]]
     save_groups(gs)
+
+
+def journal(**rec):
+    """Add one copy to the trail (moves.jsonl). Never fails: a copy that worked is not undone for want of a line."""
+    try:
+        CONF.mkdir(parents=True, exist_ok=True)
+        with open(MOVES, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(dict({"at": int(time.time())}, **rec), ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def trail_of(sid):
+    out = []
+    try:
+        with open(MOVES, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and str(d.get("sid") or "").startswith(sid):
+                    out.append(d)
+    except OSError:
+        pass
+    return out
+
+
+def copy_limits():
+    d = load(COPIES)
+    d = d if isinstance(d, dict) else {}
+    ok = lambda v, lo: isinstance(v, (int, float)) and v >= lo
+    return {"copies": int(d["copies"]) if ok(d.get("copies"), 1) else 2, "mb": float(d["mb"]) if ok(d.get("mb"), 1) else 1024.0}
+
+
+def folder_name(c):
+    """A CLI folder as its account's name, else the folder."""
+    a = cli_account(c)
+    return names().get(a, a[:8]) if a else short(c)
+
+
+def session_copies(extra=()):
+    """Every terminal session's copies across the CLI login folders (and ~/.claude, which the desktop app reads):
+    sid -> [{dir, name, bytes, mtime, path}], newest first."""
+    by = {}
+    for c in dict.fromkeys(cli_configs(extra) + [DESKTOP_HOME]):
+        nm = t("cp_desk") if c == DESKTOP_HOME else folder_name(c)  # every desktop account reads ~/.claude
+        for f in c.glob("projects/*/*.jsonl"):
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            by.setdefault(f.stem, []).append({"dir": str(c), "name": nm, "bytes": st.st_size, "mtime": st.st_mtime, "path": str(f)})
+    for v in by.values():  # copies keep their mtime, so the longer one breaks a tie
+        v.sort(key=lambda x: (-x["mtime"], -x["bytes"]))
+    return by
+
+
+def dir_size(p):
+    n = k = 0
+    for root, _, files in os.walk(p):
+        for f in files:
+            try:
+                n += os.path.getsize(os.path.join(root, f))
+                k += 1
+            except OSError:
+                pass
+    return n, k
+
+
+def copies_report(extra=()):
+    """Sessions kept in more than one folder, what the extra copies take, claude-move's own backups, and whether
+    any of it is past the limits (copies of one session; MB of extra copies, MB of backups)."""
+    lim, lb, known = copy_limits(), labels(), index_titles()
+    rows = []
+    for sid, v in session_copies(extra).items():
+        if len(v) < 2:
+            continue
+        given, ai = known.get(sid, (None, None))
+        rows.append({"sid": sid, "title": lb.get(sid) or given or ai or first_prompt(Path(v[0]["path"])) or sid[:8], "copies": v,
+                     "extra": sum(x["bytes"] for x in v[1:])})
+    rows.sort(key=lambda r: -r["extra"])
+    extra_b = sum(r["extra"] for r in rows)
+    bk = {}
+    for key, p in (("run", CONF / "run-backups"), ("desk", BACKUPS)):
+        n, k = dir_size(p) if p.is_dir() else (0, 0)
+        bk[key] = {"path": short(p), "bytes": n, "files": k, "sets": len(list(p.iterdir())) if p.is_dir() else 0}
+    over = []
+    many = [r for r in rows if len(r["copies"]) > lim["copies"]]
+    if many:
+        over.append(t("cp_over_n", n=len(many), c=lim["copies"]))
+    if extra_b / 1e6 > lim["mb"]:
+        over.append(t("cp_over_mb", m=f"{extra_b / 1e6:,.0f}", l=f"{lim['mb']:,.0f}"))
+    if (bk["run"]["bytes"] + bk["desk"]["bytes"]) / 1e6 > lim["mb"]:
+        over.append(t("cp_over_bk", m=f"{(bk['run']['bytes'] + bk['desk']['bytes']) / 1e6:,.0f}", l=f"{lim['mb']:,.0f}"))
+    return {"rows": rows, "extra": extra_b, "backups": bk, "limits": lim, "over": over, "archived": archived(), "sets": backup_sets()}
+
+
+def archived():
+    """Copies put aside, newest first: [{id, sid, dir, path, bytes, at}]."""
+    out = []
+    for d in sorted(ARCHIVE.iterdir(), reverse=True) if ARCHIVE.is_dir() else []:
+        m = load(d / "meta.json")
+        if isinstance(m, dict) and m.get("sid"):
+            f = next(d.glob("*.jsonl"), None)
+            out.append(dict(m, id=d.name, bytes=f.stat().st_size if f else 0))
+    return out
+
+
+def backup_sets():
+    """claude-move's own backups, one set a folder: terminal copies' (run) and desktop moves' (desk, which undo uses)."""
+    out = []
+    for kind, root in (("run", CONF / "run-backups"), ("desk", BACKUPS)):
+        for d in sorted(root.iterdir()) if root.is_dir() else []:
+            if d.is_dir():
+                n, k = dir_size(d)
+                m = load(d / MANIFEST) if kind == "desk" else None
+                out.append({"kind": kind, "id": d.name, "bytes": n, "files": k,
+                            "undone": bool(isinstance(m, dict) and m.get("undone"))})
+    return out
+
+
+def archive_copy(sid, folder, extra=()):
+    """Put one copy of a session aside, into ARCHIVE: never the newest copy, one a running session uses, or the one
+    in ~/.claude a desktop list still opens. Returns (ok, message)."""
+    v = session_copies(extra).get(sid) or []
+    c = next((x for x in v if Path(x["dir"]).resolve() == Path(folder).resolve()), None)
+    if not c:
+        return False, t("ar_none")
+    if len(v) < 2 or c is v[0]:
+        return False, t("ar_newest")
+    if any(r["sid"] == sid and Path(r["cfg"]).resolve() == Path(c["dir"]).resolve() for r in live_sessions(extra)):
+        return False, t("ar_running")
+    if Path(c["dir"]).resolve() == DESKTOP_HOME.resolve() and any(
+            sid in (d.get("cliSessionId"), d.get("sessionId")) for a in accounts() for _, d in a["sessions"]):
+        return False, t("ar_desk")
+    src = Path(c["path"])
+    dest = ARCHIVE / f'{time.strftime("%Y%m%d-%H%M%S")}-{Path(c["dir"]).name.lstrip(".")}-{sid[:8]}'
+    dest.mkdir(parents=True)
+    (dest / "meta.json").write_text(json.dumps({"sid": sid, "dir": c["dir"], "path": str(src), "at": int(time.time())},
+                                               ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    shutil.move(str(src), str(dest / src.name))
+    side = src.parent / sid
+    if side.is_dir():
+        shutil.move(str(side), str(dest / sid))
+    journal(kind="archive", sid=sid, src=c["dir"], dst=str(dest), bytes=c["bytes"])
+    return True, t("ar_done", w=c["name"], p=short(dest))
+
+
+def restore_copy(aid):
+    """Put an archived copy back where it was, if nothing has taken its place."""
+    m = next((x for x in archived() if x["id"] == aid), None)
+    if not m:
+        return False, t("ar_none")
+    d, back = ARCHIVE / aid, Path(m["path"])
+    if back.exists():
+        return False, t("ar_taken", p=short(back))
+    back.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(d / back.name), str(back))
+    if (d / m["sid"]).is_dir() and not (back.parent / m["sid"]).exists():
+        shutil.move(str(d / m["sid"]), str(back.parent / m["sid"]))
+    shutil.rmtree(d)
+    journal(kind="restore", sid=m["sid"], src=str(d), dst=m["dir"], bytes=m["bytes"])
+    return True, t("ar_restored", p=short(back))
+
+
+def delete_kept(kind, iid):
+    """Delete for good one archived copy, or one of claude-move's own backup sets. Nothing else can be deleted."""
+    if kind == "archive":
+        m = next((x for x in archived() if x["id"] == iid), None)
+        root, sid = ARCHIVE, (m or {}).get("sid")
+    elif kind in ("run", "desk"):
+        m = next((x for x in backup_sets() if x["kind"] == kind and x["id"] == iid), None)
+        root, sid = (CONF / "run-backups" if kind == "run" else BACKUPS), None
+    else:
+        m = None
+    if not m:
+        return False, t("ar_none")
+    n, _ = dir_size(root / iid)
+    shutil.rmtree(root / iid)
+    journal(kind="delete", sid=sid, src=str(root / iid), what=kind, bytes=n)
+    return True, t("ar_deleted", p=iid, m=mb(n))
+
+
+def trail_report(token, extra=()):
+    """One session's trail: where its copies are now, the desktop lists that hold it, every copy claude-move made
+    of it, and the backups that hold an older version."""
+    token = token.strip().lower()
+    by = session_copies(extra)
+    sids = sorted({sid for sid in by if sid.startswith(token)} | {d.get("sid") for d in trail_of(token) if d.get("sid")})
+    if not token or not sids:
+        return None, t("rs_none", i=token)
+    if len(sids) > 1:
+        return None, t("rs_many", i=token, l=", ".join(x[:12] for x in sids[:6]))
+    sid = sids[0]
+    desk = []
+    for a in accounts():
+        for f, d in a["sessions"]:
+            if sid in (d.get("cliSessionId"), d.get("sessionId")):
+                desk.append({"name": show(a), "entry": f.name, "title": d.get("title") or "", "last": d.get("lastActivityAt") or 0})
+    older = []
+    for p in sorted((CONF / "run-backups").glob(f"*/{sid}.jsonl")):
+        try:
+            older.append({"path": str(p), "bytes": p.stat().st_size, "mtime": p.stat().st_mtime})
+        except OSError:
+            pass
+    for bk in sorted(BACKUPS.glob("*")) if BACKUPS.is_dir() else []:
+        for f in bk.glob("local_*.json"):
+            d = load(f)
+            if isinstance(d, dict) and sid in (d.get("cliSessionId"), d.get("sessionId")):
+                older.append({"path": str(f), "bytes": f.stat().st_size, "mtime": f.stat().st_mtime})
+    return {"sid": sid, "copies": by.get(sid, []), "desk": desk, "moves": trail_of(sid), "older": older}, None
 
 
 def set_pin(sid, on):
@@ -6171,6 +6454,85 @@ def cmd_codex(args):
     print(t("cx_notes"))
 
 
+def mb(n):
+    return f"{n / 1e6:,.1f} MB" if n < 1e9 else f"{n / 1e9:,.2f} GB"
+
+
+def copy_folder(token, extra=()):
+    """A folder that holds copies: an account's CLI login, "desktop" for ~/.claude, or a path."""
+    if token.strip().lower() in ("desktop", "桌面", "~/.claude"):
+        return DESKTOP_HOME
+    return cli_dir(token.strip(), extra) or Path(os.path.expanduser(token))
+
+
+def cmd_dupes(args):
+    act = None
+    if args.archive:
+        tok = args.archive[0].strip().lower()
+        sids = [x for x in session_copies(args.config or ()) if tok and x.startswith(tok)]
+        if len(sids) != 1:
+            sys.exit(t("rs_many", i=tok, l=", ".join(x[:12] for x in sids[:6])) if sids else t("rs_none", i=tok))
+        act = archive_copy(sids[0], copy_folder(args.archive[1], args.config or ()), args.config or ())
+    elif args.restore:
+        act = restore_copy(args.restore)
+    elif args.delete:
+        kind = next((x["kind"] for x in backup_sets() if x["id"] == args.delete), "archive")
+        act = delete_kept(kind, args.delete)
+    if act:
+        print(act[1])
+        if not act[0]:
+            sys.exit(1)
+        return
+    if args.max_copies is not None or args.max_mb is not None:
+        lim = copy_limits()
+        lim.update({k: v for k, v in (("copies", args.max_copies), ("mb", args.max_mb)) if v is not None})
+        save_json(COPIES, lim)
+        print(t("cp_limits", c=lim["copies"], m=f"{lim['mb']:,.0f}"))
+    rep = copies_report(args.config or ())
+    if args.json:
+        print(json.dumps(rep, ensure_ascii=False))
+        return
+    print(t("cp_head", n=len(rep["rows"]), m=mb(rep["extra"])))
+    for r in rep["rows"]:
+        print(f'\n{r["title"]}  [{r["sid"][:8]}]  ' + t("cp_extra", m=mb(r["extra"])))
+        for i, c in enumerate(r["copies"]):
+            print(f'  {"*" if i == 0 else " "} {c["name"]:24} {mb(c["bytes"]):>10}  {time.strftime("%m-%d %H:%M", time.localtime(c["mtime"]))}  {short(Path(c["path"]))}')
+    b = rep["backups"]
+    print("\n" + t("cp_backups", r=mb(b["run"]["bytes"]), rp=b["run"]["path"], d=mb(b["desk"]["bytes"]), dp=b["desk"]["path"]))
+    if rep["archived"]:
+        print(t("ar_head", n=len(rep["archived"])))
+        for a in rep["archived"]:
+            print(f'  {a["id"]}  {mb(a["bytes"]):>10}  {short(Path(a["path"]))}')
+    print(t("cp_limits", c=rep["limits"]["copies"], m=f"{rep['limits']['mb']:,.0f}"))
+    for x in rep["over"]:
+        print("! " + x)
+    print(t("cp_hint"))
+
+
+def cmd_trail(args):
+    tr, err = trail_report(args.session, args.config or ())
+    if err:
+        sys.exit(err)
+    nm, stamp = names(), lambda s: time.strftime("%m-%d %H:%M", time.localtime(s))
+    who = lambda x: (folder_name(Path(x)) if os.path.isabs(str(x)) else nm.get(x, str(x)[:8])) if x else "-"
+    print(t("tr_head", i=tr["sid"]))
+    print(t("tr_copies", n=len(tr["copies"])))
+    for i, c in enumerate(tr["copies"]):
+        print(f'  {"*" if i == 0 else " "} {c["name"]:24} {mb(c["bytes"]):>10}  {stamp(c["mtime"])}  {short(Path(c["path"]))}')
+    if tr["desk"]:
+        print(t("tr_desk", l=", ".join(f'{d["name"]} ({d["entry"]})' for d in tr["desk"])))
+    print(t("tr_moves", n=len(tr["moves"])))
+    for d in tr["moves"]:
+        print(f'  {stamp(d.get("at") or 0)}  {t("tr_kind_" + str(d.get("kind")))}  {who(d.get("src"))} -> {who(d.get("dst"))}'
+              + (f'  {mb(d["bytes"])}' if d.get("bytes") else "") + (f'  ({t("tr_saved", p=short(Path(d["backup"])))})' if d.get("backup") else ""))
+    if not tr["moves"]:
+        print("  " + t("tr_none"))
+    if tr["older"]:
+        print(t("tr_older", n=len(tr["older"])))
+        for o in tr["older"]:
+            print(f'    {stamp(o["mtime"])}  {mb(o["bytes"]):>10}  {short(Path(o["path"]))}')
+
+
 def cmd_tmux(args):
     if args.action == "conf":
         if not (args.install or args.remove):
@@ -6470,6 +6832,31 @@ def panel_api(method, path, q, body, extra=()):
             return 200, {"sessions": cli_sessions(cfg)}
         if name == "doctor":
             return 200, {"items": doctor_items(extra)}
+        if name == "copies":
+            rep = copies_report(extra)
+            return 200, dict(rep, text=t("cp_head", n=len(rep["rows"]), m=mb(rep["extra"])),
+                             backups_text=t("cp_backups", r=mb(rep["backups"]["run"]["bytes"]), rp=rep["backups"]["run"]["path"],
+                                            d=mb(rep["backups"]["desk"]["bytes"]), dp=rep["backups"]["desk"]["path"]),
+                             limits_text=t("cp_limits", c=rep["limits"]["copies"], m=f'{rep["limits"]["mb"]:,.0f}'),
+                             rows=[dict(r, copies=[dict(c, size=mb(c["bytes"]), when=time.strftime("%m-%d %H:%M", time.localtime(c["mtime"])),
+                                                        path=short(Path(c["path"]))) for c in r["copies"]], extra_text=t("cp_extra", m=mb(r["extra"])))
+                                   for r in rep["rows"]],
+                             archived=[dict(a, size=mb(a["bytes"]), path=short(Path(a["path"]))) for a in rep["archived"]],
+                             sets=[dict(x, size=mb(x["bytes"]), what=t("pt_set_" + x["kind"])) for x in rep["sets"]],
+                             archived_text=t("ar_head", n=len(rep["archived"])), sets_text=t("ar_sets", n=len(rep["sets"])))
+        if name == "trail":
+            import contextlib
+            import io
+            buf = io.StringIO()
+            sid = str(q.get("sid") or "")
+            if not re.fullmatch(r"[0-9a-f-]{8,64}", sid):
+                return bad
+            with contextlib.redirect_stdout(buf):
+                try:
+                    cmd_trail(argparse.Namespace(session=sid, config=list(extra)))
+                except SystemExit as e:
+                    print(e.code if isinstance(e.code, str) else "")
+            return 200, {"log": buf.getvalue()}
         if name == "notify":
             return 200, notify_conf()
         if name == "crew":
@@ -6594,6 +6981,33 @@ def panel_api(method, path, q, body, extra=()):
             use_lang(body["lang"])
         save_json(LOOK, cur)
         return 200, {"ok": True}
+    if name == "copies":
+        do = body.get("do")
+        if do == "limits":
+            try:
+                c, m = int(body.get("copies")), float(body.get("mb"))
+            except (TypeError, ValueError):
+                return bad
+            if not (1 <= c <= 50 and 1 <= m <= 1e6):
+                return bad
+            save_json(COPIES, {"copies": c, "mb": m})
+            return 200, {"ok": True, "log": t("cp_limits", c=c, m=f"{m:,.0f}")}
+        if do == "archive":
+            sid, d = str(body.get("sid") or ""), str(body.get("dir") or "")
+            if d not in {c["dir"] for c in session_copies(extra).get(sid, [])}:
+                return bad
+            ok, log = archive_copy(sid, Path(d), extra)
+            return 200, {"ok": ok, "log": log}
+        if do == "restore":
+            ok, log = restore_copy(str(body.get("id") or ""))
+            return 200, {"ok": ok, "log": log}
+        if do == "delete":
+            kind, iid = str(body.get("kind") or ""), str(body.get("id") or "")
+            if kind not in ("archive", "run", "desk") or not iid or "/" in iid or "\\" in iid or iid.startswith("."):
+                return bad
+            ok, log = delete_kept(kind, iid)
+            return 200, {"ok": ok, "log": log}
+        return bad
     if name == "crew":
         do = body.get("do")
         if do == "pin":
@@ -6670,6 +7084,9 @@ def panel_api(method, path, q, body, extra=()):
 
 
 TOOLS_CSS = """
+.warnbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--hot)}
+.warnbar span{flex:1;min-width:0;color:var(--dim)} .warnbar .i{color:var(--hot)}
+#cp-foot{white-space:pre-line}
 .toolbox details{border-top:1px solid var(--hair);margin:0 16px;padding:14px 0 16px}
 .toolbox details:not([open]){display:none}
 .toolbox summary{list-style:none;font:600 15px var(--display);pointer-events:none}
@@ -6972,8 +7389,43 @@ $("lv-conf").onclick = async () => {
 loadLive(); setInterval(loadLive, 10000);
 $("up-go").onclick = async () => { $("up-msg").textContent = TT.p_working; $("up-msg").textContent = (await get("update")).log; };
 
+async function loadCopies() {
+  const r = await get("copies"), box = $("cp-list");
+  $("cp-head").textContent = r.text;
+  box.innerHTML = "";
+  $("cp-n").value = r.limits.copies; $("cp-mb").value = r.limits.mb;
+  const act = async (body, ask) => {
+    if (ask && !confirm(ask)) return;
+    say("cp-log", (await post("copies", body)).log);
+    loadCopies();
+  };
+  const btn = (label, fn) => { const b = el("button", {className: "ghost", textContent: label}); b.onclick = fn; return b; };
+  r.rows.forEach(x => {
+    box.append(el("div", {className: "item"}, el("span", {className: "t", textContent: x.title + " · " + x.extra_text}),
+      btn(TT.pt_trail, async () => say("cp-log", (await get("trail", {sid: x.sid})).log))));
+    x.copies.forEach((c, i) => {
+      const row = el("div", {className: "item dim"},
+        el("span", {className: "t", textContent: (i ? "  " : "* ") + c.name + " · " + c.size + " · " + c.when}),
+        el("small", {className: "dim", textContent: c.path}));
+      if (i) row.append(btn(TT.pt_archive, () => act({do: "archive", sid: x.sid, dir: c.dir}, TT.pt_archive_ask)));
+      box.append(row);
+    });
+  });
+  const ar = $("cp-ar"), sets = $("cp-sets");
+  ar.innerHTML = ""; sets.innerHTML = "";
+  $("cp-arh").textContent = r.archived.length ? r.archived_text : "";
+  r.archived.forEach(a => ar.append(el("div", {className: "item"}, el("span", {className: "t", textContent: a.path + " · " + a.size}),
+    btn(TT.pt_restore, () => act({do: "restore", id: a.id})),
+    btn(TT.pt_delete, () => act({do: "delete", kind: "archive", id: a.id}, fmt(TT.pt_delete_ask, {p: a.path}))))));
+  $("cp-seth").textContent = r.sets.length ? r.sets_text : "";
+  r.sets.forEach(x => sets.append(el("div", {className: "item"}, el("span", {className: "t", textContent: x.id + " · " + x.what + " · " + x.size}),
+    btn(TT.pt_delete, () => act({do: "delete", kind: x.kind, id: x.id},
+      fmt(x.kind === "desk" && !x.undone ? TT.pt_delete_desk : TT.pt_delete_ask, {p: x.id}))))));
+  $("cp-foot").textContent = [r.backups_text, r.limits_text].concat(r.over.map(o => "! " + o)).join("\n");
+}
+$("cp-save").onclick = async () => { say("cp-log", (await post("copies", {do: "limits", copies: $("cp-n").value, mb: $("cp-mb").value})).log); loadCopies(); };
 const loaders = {"t-move": loadMove, "t-undo": loadUndo, "t-sess": loadSess, "t-imp": loadImp, "t-runs": loadRuns,
-  "t-doc": loadDoc, "t-notify": loadNotify, "t-crew": loadCrew};
+  "t-doc": loadDoc, "t-notify": loadNotify, "t-crew": loadCrew, "t-copies": loadCopies};
 Object.entries(loaders).forEach(([id, fn]) => $(id).addEventListener("toggle", () => { if ($(id).open) fn(); }));
 try { JSON.parse(sessionStorage.getItem("open") || "[]").forEach(id => { if ($(id)) $(id).open = true; }); } catch (e) {}
 """
@@ -6984,7 +7436,8 @@ TOOLS_KEYS = ("p_working", "no_backups", "pt_move_confirm", "pt_undo_btn", "pt_u
               "pt_crew_sched_on", "pt_crew_sched_off", "ps_none", "ps_busy", "ps_idle", "pp_live_sum", "pp_go",
               "pp_pin", "pp_unpin", "pp_tm_conf_on", "pp_tm_conf_off", "pp_tm_conf_confirm",
               "pt_mate_pin", "pt_mate_pinned", "pt_mate_pin_confirm", "pp_group", "pp_group_ask", "pp_group_to",
-              "pp_group_confirm", "pp_ungrouped")
+              "pp_group_confirm", "pp_ungrouped", "pt_trail", "pt_archive", "pt_restore", "pt_delete", "pt_archive_ask",
+              "pt_delete_ask", "pt_delete_desk")
 
 
 def tools_html():
@@ -7012,6 +7465,12 @@ def tools_html():
 <div class="list" id="crew-info"></div><div class="list" id="crew-accts"></div>
 <div class="row"><button class="ghost" id="crew-snap">{e("pt_crew_snap")}</button><button class="ghost" id="crew-sched"></button></div>
 <pre class="log" id="crew-log" hidden></pre></details>
+<details id="t-copies"><summary>{e("pt_copies")}</summary>
+<div class="row">{e("pt_limits")} <input type="number" id="cp-n" min="1" max="50" style="width:4em"> {e("pt_limit_copies")}
+<input type="number" id="cp-mb" min="1" style="width:6em"> {e("pt_limit_mb")} <button class="ghost" id="cp-save">{e("pt_save")}</button></div>
+<p class="dim" id="cp-head"></p><div class="list" id="cp-list"></div>
+<p class="dim" id="cp-arh"></p><div class="list" id="cp-ar"></div><p class="dim" id="cp-seth"></p><div class="list" id="cp-sets"></div>
+<p class="dim" id="cp-foot"></p><pre class="log" id="cp-log" hidden></pre></details>
 <details id="t-upd"><summary>{e("pt_update")}</summary><div class="row"><button class="ghost" id="up-go">{e("pt_update_btn")}</button></div>
 <p class="dim" id="up-msg"></p></details>
 </div>'''
@@ -7179,6 +7638,23 @@ def main(argv=None):
     ps.add_argument("--json", action="store_true", help="print them as JSON")
     ps.add_argument("--config", action="append", help="also look in this CLI config folder (repeatable)")
     ps.set_defaults(fn=cmd_ps)
+    dp = sub.add_parser("dupes", help="terminal sessions kept in more than one login folder, what the copies and "
+                                      "claude-move's backups take, and the limits the panel warns at")
+    dp.add_argument("--max-copies", type=int, metavar="N", help="warn when one session is in more than N folders (default 2)")
+    dp.add_argument("--max-mb", type=float, metavar="MB", help="warn when the extra copies, or the backups, pass MB (default 1024)")
+    dp.add_argument("--json", action="store_true", help="as JSON")
+    dg = dp.add_mutually_exclusive_group()
+    dg.add_argument("--archive", nargs=2, metavar=("SESSION", "FOLDER"), help="put that session's copy in FOLDER (an account, "
+                    "desktop, or a path) aside in claude-move's archive; never the newest copy, one in use, or one the desktop list opens")
+    dg.add_argument("--restore", metavar="ID", help="put an archived copy back where it was")
+    dg.add_argument("--delete", metavar="ID", help="delete for good an archived copy or one of claude-move's backup sets")
+    dp.add_argument("--config", action="append", help="also this CLI config folder (repeatable)")
+    dp.set_defaults(fn=cmd_dupes)
+    tp = sub.add_parser("trail", help="one session's trail: its copies now, the desktop lists holding it, every copy "
+                                      "claude-move made of it, and the backups with an older version")
+    tp.add_argument("session", help="session id or its first characters")
+    tp.add_argument("--config", action="append", help="also this CLI config folder (repeatable)")
+    tp.set_defaults(fn=cmd_trail)
     cxp = sub.add_parser("codex", help="Codex logins: their official numbers and plans, a terminal on one, or "
                                        "signing in another (each in its own CODEX_HOME folder); Codex sessions are not moved")
     cxp.add_argument("action", nargs="?", default="list", choices=("list", "term", "login"))
