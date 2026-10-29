@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.4
 - A trail of every copy: each desktop move, undo, terminal copy (`resume --to`, `run`, moving a group) and `import-cli` adds a line to `~/.config/claude-move/moves.jsonl` (when, which session, from, to, size, where what it replaced was saved).
 - `trail <session>`: a session's copies now (the newest marked), the desktop lists holding it, the copies claude-move made of it, and the older versions in backups.
 - `dupes`: terminal sessions kept in more than one folder, what the extra copies and claude-move's backups take, and the limits (`--max-copies`, `--max-mb`; 2 copies and 1024 MB by default). Past a limit the panel shows a warning; its new Copies tool sets the limits, lists the copies with each one's trail, archives a copy (`dupes --archive`), puts one back (`--restore`), and deletes archived copies and claude-move's own backup sets (`--delete`). Archiving is refused for a session's newest copy, a copy a running session uses, and the copy in `~/.claude` a desktop list opens; only archived copies and claude-move's backups can be deleted, each after a confirmation.
