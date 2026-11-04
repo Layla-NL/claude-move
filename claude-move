@@ -42,6 +42,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from itertools import chain
 from pathlib import Path
 
 __version__ = "0.8.4"
@@ -325,6 +326,15 @@ T = {
     "u_html": ("Panel written to {p}", "面板已生成：{p}"),
     "u_scan": ("Reading transcripts (first run can take a minute; later runs are incremental)...",
                "正在读会话记录（第一次可能要一分钟，之后只读新增的）……"),
+    "u_reused": ("Numbers read {s} s ago (another claude-move read them; it reads again when they are {f} s old).",
+                 "用的是 {s} 秒前读的数（别的 claude-move 刚读过；满 {f} 秒才重读）。"),
+    "u_busy_old": ("Another claude-move is reading transcripts right now, so these are the numbers it read {s} s ago.",
+                   "另一个 claude-move 正在读会话记录，先用它 {s} 秒前读的数。"),
+    "u_busy": ("Another claude-move is still reading transcripts and nothing was read before; try again in a minute.",
+               "另一个 claude-move 还在读会话记录，之前也没读过；过一分钟再试。"),
+    "u_old": ("Shown: the numbers read {s} s ago.", "下面是 {s} 秒前读的数。"),
+    "u_partial": ("Transcripts not all read within {s} s; what was read is kept and the next run goes on from there.",
+                  "{s} 秒内没读完会话记录；读过的已存下，下次接着读。"),
     "w_on": ("Status line recorder installed in {p}. Each refresh of the Claude Code CLI status line now saves the official 5-hour/weekly % for the signed-in account.",
              "已在 {p} 装好状态栏记录器。之后命令行版 Claude Code 每刷新一次状态栏，就记下当前账号官方的 5 小时/每周百分比。"),
     "w_chain": ("Your existing status line is kept and still shown.", "你原来的状态栏保留，照样显示。"),
@@ -1108,6 +1118,10 @@ def import_one(f, dst_cfg):
 # ---------- quota panel: usage / watch
 CONF = NAMES.parent
 CACHE = Path(os.environ.get("CLAUDE_MOVE_CACHE", str(HOME / ".cache/claude-move/usage-v3.json")))
+REPORT = CACHE.with_name("usage-report.json")  # the last finished report, shared by every caller on this computer
+USAGE_LOCK = CACHE.with_name("usage.lock")
+USAGE_FRESH = float(os.environ.get("CLAUDE_MOVE_USAGE_FRESH") or 60)  # seconds a report is reused before reading again
+USAGE_TIMEOUT = float(os.environ.get("CLAUDE_MOVE_USAGE_TIMEOUT") or 60)  # hard limit for one `usage` run
 LOGS = Path(os.environ.get("CLAUDE_MOVE_LOGS") or (ROOT.parent / "logs" if WIN else HOME / "Library/Logs/Claude"))
 LIMITS = CONF / "limits.json"
 PANEL = CONF / "panel.json"
@@ -1140,36 +1154,112 @@ def api_dollars(model, u):
     return tokens * PRICE_IN[fam] / 1e6
 
 
-def scan_file(path, start):
-    """Usage and limit-hit records appended to one transcript since byte offset `start`, and the first working
-    folder recorded there."""
+class ScanUnfinished(Exception):
+    """Transcripts were not all read by the deadline. What was read is saved, so the next run goes on from there."""
+
+
+def write_atomic(path, text):
+    """Write a whole file at once: readers see the old file or the new one, never half of it. `text` is a string or
+    pieces of one. A temp file left by a run that was killed mid-write is cleared on the next write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for old in path.parent.glob(path.name + ".*.tmp"):
+        try:
+            if time.time() - old.stat().st_mtime > 600:
+                old.unlink()
+        except OSError:
+            pass
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.writelines([text] if isinstance(text, str) else text)
+        for i in range(20):  # on Windows a reader holding the old file open makes the swap fail for a moment
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if not WIN or i == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+class machine_lock:
+    """At most one holder on this computer. The operating system lets go of the lock when the holding process ends,
+    even when it is killed, so a run that dies never leaves it taken. `got` says whether it was taken within `wait`
+    seconds."""
+
+    def __init__(self, path, wait=0):
+        self.path, self.wait, self.got, self.fh = path, wait, False, None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fh = open(self.path, "a+b")
+        end = time.time() + self.wait
+        while True:
+            try:
+                if WIN:
+                    import msvcrt
+                    self.fh.seek(0)
+                    msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.got = True
+                return self
+            except OSError:
+                if time.time() >= end:
+                    return self
+                time.sleep(0.2)
+
+    def __exit__(self, *exc):
+        try:
+            if self.got and WIN:
+                import msvcrt
+                self.fh.seek(0)
+                msvcrt.locking(self.fh.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        finally:
+            self.fh.close()  # closing also lets go of a POSIX lock
+
+
+def scan_file(path, start, deadline=None):
+    """Usage and limit-hit records appended to one transcript since byte offset `start`, the offset read up to, and
+    the first working folder recorded there. Read a line at a time (transcripts reach a gigabyte); past `deadline`
+    it stops at a line boundary and returns how far it got."""
     recs, hits, cwd = [], [], ""
+    off = start
     with open(path, "rb") as fh:
         fh.seek(start)
-        data = fh.read()
-    end = data.rfind(b"\n") + 1  # leave a half-written last line for the next run
-    for raw in data[:end].splitlines():
-        if b'"usage"' not in raw and b"usage_limit_reached" not in raw:
-            continue
-        try:
-            rec = json.loads(raw)
-        except ValueError:
-            continue
-        ts = iso_ts(rec.get("timestamp") or "")
-        sid = rec.get("sessionId")
-        if ts is None or not sid:
-            continue
-        cwd = cwd or str(rec.get("cwd") or "")
-        ep = {"claude-desktop": "d", "cli": "c"}.get(rec.get("entrypoint"), "")
-        info = (rec.get("apiErrorParams") or {}).get("rate_limit_info")
-        if rec.get("apiError") == "usage_limit_reached" and isinstance(info, dict) and info.get("resetsAt"):
-            hits.append([ts, sid, info.get("rateLimitType") or "", info["resetsAt"], ep])
-            continue
-        msg = rec.get("message") or {}
-        u = msg.get("usage")
-        if rec.get("type") == "assistant" and isinstance(u, dict) and msg.get("id") and msg.get("model") != "<synthetic>":
-            recs.append([ts, sid, msg["id"], round(api_dollars(msg.get("model"), u), 6), ep])
-    return recs, hits, start + end, cwd
+        for n, raw in enumerate(fh):
+            if not raw.endswith(b"\n"):
+                break  # a half-written last line: left for the next run
+            if deadline and not n % 2000 and time.time() > deadline:
+                break
+            off += len(raw)
+            if b'"usage"' not in raw and b"usage_limit_reached" not in raw:
+                continue
+            try:
+                rec = json.loads(raw)
+            except ValueError:
+                continue
+            ts = iso_ts(rec.get("timestamp") or "")
+            sid = rec.get("sessionId")
+            if ts is None or not sid:
+                continue
+            cwd = cwd or str(rec.get("cwd") or "")
+            ep = {"claude-desktop": "d", "cli": "c"}.get(rec.get("entrypoint"), "")
+            info = (rec.get("apiErrorParams") or {}).get("rate_limit_info")
+            if rec.get("apiError") == "usage_limit_reached" and isinstance(info, dict) and info.get("resetsAt"):
+                hits.append([ts, sid, info.get("rateLimitType") or "", info["resetsAt"], ep])
+                continue
+            msg = rec.get("message") or {}
+            u = msg.get("usage")
+            if rec.get("type") == "assistant" and isinstance(u, dict) and msg.get("id") and msg.get("model") != "<synthetic>":
+                recs.append([ts, sid, msg["id"], round(api_dollars(msg.get("model"), u), 6), ep])
+    return recs, hits, off, cwd
 
 
 def project_of(folder, cwd):
@@ -1187,12 +1277,30 @@ def project_of(folder, cwd):
     return p.rsplit("/", 2)[-2] if name.startswith("local_") and p.count("/") >= 2 else name  # a desktop session's notes
 
 
-def scan(roots):
-    """Incrementally read transcripts under each root's projects/; cache per file by offset."""
+def scan(roots, deadline=None):
+    """Incrementally read transcripts under each root's projects/; cache per file by offset. Past `deadline` it
+    saves how far it got and raises ScanUnfinished. Callers hold USAGE_LOCK (shared_report), so one process at a
+    time reads and writes the cache."""
+    import gc
+    gc_was = gc.isenabled()
+    gc.disable()  # hundreds of thousands of small lists and no cycles: collecting while they are built only costs time
+    try:
+        return scan_cached(roots, deadline)
+    finally:
+        if gc_was:
+            gc.enable()
+
+
+def scan_cached(roots, deadline):
     cache = load(CACHE) or {}
     if cache.get("v") != 4:
         cache = {"v": 4, "files": {}}
     files, cutoff, seen = cache["files"], time.time() - KEEP_DAYS * 86400, set()
+    sids = {}  # one string per session id, not one per reply: the cache holds hundreds of thousands of replies
+    for c in files.values():
+        for r in c["recs"]:
+            r[1] = sids.setdefault(r[1], r[1])
+    unfinished = False
     for root in roots:
         for p in (root / "projects").rglob("*.jsonl") if (root / "projects").is_dir() else []:
             try:
@@ -1206,8 +1314,11 @@ def scan(roots):
             c = files.get(key)
             if not c or c["size"] > st.st_size or c.get("ino") != st.st_ino:
                 c = files[key] = {"size": 0, "off": 0, "ino": st.st_ino, "recs": [], "hits": [], "root": str(root)}
-            if st.st_size > c["off"]:
-                recs, hits, off, cwd = scan_file(p, c["off"])
+            if st.st_size > c["off"] and deadline and time.time() > deadline:
+                unfinished = True
+            elif st.st_size > c["off"]:
+                recs, hits, off, cwd = scan_file(p, c["off"], deadline)
+                unfinished = unfinished or (deadline and time.time() > deadline and off < st.st_size)
                 c["cwd"] = c.get("cwd") or cwd
                 c["recs"] += recs
                 c["hits"] += hits
@@ -1218,8 +1329,12 @@ def scan(roots):
         c["recs"] = [r for r in c["recs"] if r[0] >= cutoff]
         if not c["recs"] and all(h[3] < cutoff for h in c["hits"]):
             del files[key]
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(cache, separators=(",", ":")), encoding="utf-8")
+    # written a file's entry at a time: one string of the whole cache would be as big again as the cache itself
+    write_atomic(CACHE, chain(['{"v":4,"files":{'],
+                              (("," if i else "") + json.dumps(k) + ":" + json.dumps(c, separators=(",", ":"))
+                               for i, (k, c) in enumerate(files.items())), ["}}"]))
+    if unfinished:
+        raise ScanUnfinished()
     found, known = {}, {}
     for key, c in files.items():
         folder = Path(key).relative_to(Path(c["root"]) / "projects").parts[0]
@@ -1236,7 +1351,8 @@ def scan(roots):
         for r in c["recs"]:
             if r[2] not in dedup:  # a reply is written once per content block, and resumed sessions copy history
                 dedup.add(r[2])
-                recs.append(r + [proj, c["root"]])
+                r += [proj, c["root"]]  # in place: the cache is written, and a copy of every reply would double it
+                recs.append(r)
         hits += [h + [c["root"]] for h in c["hits"]]
     return recs, hits
 
@@ -1693,7 +1809,60 @@ def refresh_one(c, exe=None):
     return rows
 
 
-def usage_report(extra_cfgs=(), now=None):
+class ReportBusy(Exception):
+    """Another process is reading transcripts, it did not finish in time, and there is no earlier report."""
+
+
+def shared_report(extra_cfgs=(), deadline=None, must_read=False, fresh=None, on_read=None):
+    """usage_report, read by one process at a time on this computer and shared through REPORT, so that many callers
+    (a Claude Code mod in each of dozens of sessions) cost one read. A report younger than `fresh` seconds, and newer
+    than the account names and official numbers it shows, is used as it is. While another process is reading, its
+    last report is used without waiting, unless `must_read` (after asking /usage) or there is none yet: then this
+    waits for the lock until `deadline` (10 minutes without one). Returns (report, how): how is "read", "reused",
+    "busy" (the other process is still reading) or "partial" (this read ran out of time; the last report is used)."""
+    fresh = USAGE_FRESH if fresh is None else fresh
+    key = sorted(str(Path(os.path.expanduser(c))) for c in extra_cfgs)
+
+    def last():
+        d = load(REPORT)
+        r = d.get("rep") if isinstance(d, dict) and d.get("key") == key else None
+        return r if isinstance(r, dict) and isinstance(r.get("now"), (int, float)) else None
+
+    def usable(r):
+        changed = 0
+        for p in (NAMES, LIMITS):
+            try:
+                changed = max(changed, p.stat().st_mtime)
+            except OSError:
+                pass
+        return bool(r) and 0 <= time.time() - r["now"] < fresh and r["now"] >= changed
+
+    old = last()
+    if not must_read and usable(old):
+        return old, "reused"
+    wait = 0 if old and not must_read else max(0.0, (deadline or time.time() + 600) - time.time())
+    with machine_lock(USAGE_LOCK, wait) as lock:
+        if not lock.got:
+            if old:
+                return old, "busy"
+            raise ReportBusy()
+        new = last()  # the process that held the lock may have just written one
+        if usable(new):
+            return new, "reused"
+        if on_read:
+            on_read()
+        try:
+            rep_ = usage_report(extra_cfgs, deadline=deadline)
+        except ScanUnfinished:
+            if new or old:
+                return new or old, "partial"
+            raise
+        text = json.dumps({"key": key, "rep": rep_}, ensure_ascii=False, separators=(",", ":"))
+        write_atomic(REPORT, text)
+        return json.loads(text)["rep"], "read"  # the same values a reused report has
+
+
+def usage_report(extra_cfgs=(), now=None, deadline=None):
     now = now or time.time()
     accts = accounts()
     idx = owner_index(accts)
@@ -1703,7 +1872,7 @@ def usage_report(extra_cfgs=(), now=None):
     fallback = {str(DESKTOP_HOME): None}
     for c in roots[1:]:
         fallback[str(c)] = cli_account(c)
-    recs, hits = scan(roots)
+    recs, hits = scan(roots, deadline)
     timeline = signin_timeline()
 
     def who(ts, sid, ep, root):
@@ -1863,12 +2032,49 @@ def row_text(r, now):
     return t("u_ok") + "  " + " · ".join(parts)
 
 
+def arm_deadline(seconds):
+    """End this process after `seconds`, whatever it is doing: the kernel's SIGALRM, whose default is to terminate,
+    so a run stuck in a read or in swap still ends; on Windows a timer thread exits the process. Arm it only while
+    no child process runs, so none is left behind."""
+    import signal
+    if seconds <= 0:
+        return
+    if hasattr(signal, "SIGALRM"):
+        signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+    else:
+        import threading
+        timer = threading.Timer(seconds, os._exit, (124,))
+        timer.daemon = True
+        timer.start()
+
+
 def cmd_usage(args):
     if args.refresh:
         refresh_official(args.config or ())
         print()
-    print(t("u_scan"), file=sys.stderr)
-    rep = usage_report(args.config or ())
+    # one run at a time on this computer, and none longer than USAGE_TIMEOUT: transcripts are read until a quarter
+    # of it is left (at most 15 s), which is kept for writing the cache and the report
+    start = time.time()
+    arm_deadline(USAGE_TIMEOUT)
+    deadline = start + USAGE_TIMEOUT - min(15, USAGE_TIMEOUT / 4) if USAGE_TIMEOUT > 0 else None
+    try:
+        # --json is what scripts and the mod in every Claude Code session call: they share a report for USAGE_FRESH
+        # seconds; a person typing `usage` gets a fresh one, unless another run is reading right now
+        rep, how = shared_report(args.config or (), deadline=deadline, must_read=args.refresh,
+                                 fresh=None if args.json else 0,
+                                 on_read=lambda: print(t("u_scan"), file=sys.stderr, flush=True))
+    except ReportBusy:
+        sys.exit(t("u_busy"))
+    except ScanUnfinished:
+        sys.exit(t("u_partial", s=round(USAGE_TIMEOUT)))
+    age = round(time.time() - rep["now"])
+    if how == "reused":
+        print(t("u_reused", s=age, f=round(USAGE_FRESH)), file=sys.stderr)
+    elif how == "busy":
+        print(t("u_busy_old", s=age), file=sys.stderr)
+    elif how == "partial":
+        print(t("u_partial", s=round(USAGE_TIMEOUT)) + " " + t("u_old", s=age), file=sys.stderr)
     cx = codex_rows()
     if args.json:  # for the Claude Code mod: official numbers and use per account, nothing else happens
         keys = ("acct", "name", "plan", "cool", "week_usd", "five_usd", "week_reset", "official")
@@ -2946,7 +3152,7 @@ def cmd_panel(args):
                 return self.demo(path)
             if path == "/":
                 use_lang(look()["lang"])
-                rep_ = usage_report(args.config or ())
+                rep_ = shared_report(args.config or ())[0]
                 maybe_week_summary(rep_)
                 return self.send(200, render_html(rep_, live={"token": token}), "text/html")
             if path == "/state":
@@ -4909,7 +5115,7 @@ def next_account(skip, extra=()):
     by = {}
     for c in cli_configs(extra):
         by.setdefault(cli_account(c), c)
-    rep = usage_report([str(c) for c in by.values() if c != HOME / ".claude"])
+    rep = shared_report([str(c) for c in by.values() if c != HOME / ".claude"])[0]
     ranked = [r["acct"] for r in sorted(rep["rows"], key=rank_key) if not r["cool"]]
     ranked += [a for a in by if a not in ranked]
     now = time.time()

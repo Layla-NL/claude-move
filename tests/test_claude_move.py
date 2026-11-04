@@ -474,6 +474,127 @@ def usage_answer(session, week, opus, resets):
                  "scope": {"model": {"id": "claude-opus-5", "display_name": "Opus"}}}]}}}
 
 
+class UsageShared(unittest.TestCase):
+    """One `usage` reads at a time on this computer; the others use its report, and none runs past its time."""
+    setUp, tearDown = Usage.setUp, Usage.tearDown
+
+    def env(self, **extra):
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        env.update(CLAUDE_MOVE_HOME=str(self.home), CLAUDE_MOVE_ROOT=str(self.root), CLAUDE_MOVE_DESKTOP_CONFIG=str(self.desk),
+                   CLAUDE_MOVE_LANG="en", CLAUDE_MOVE_NOTIFY_CMD=NOOP, **extra)
+        return env
+
+    def start(self, *args, **extra):
+        p = subprocess.Popen([sys.executable, str(TOOL), *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             encoding="utf-8", env=self.env(**extra))
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait(), p.stdout.close(), p.stderr.close()))
+        return p
+
+    def hold_lock(self):
+        """Another process holding the usage lock, as a run in the middle of reading would."""
+        code = ("import sys, time, importlib.machinery as m; cm = m.SourceFileLoader('cm', sys.argv[1]).load_module(); "
+                "lk = cm.machine_lock(cm.USAGE_LOCK).__enter__(); print(lk.got, flush=True); time.sleep(120)")
+        p = subprocess.Popen([sys.executable, "-c", code, str(TOOL)], stdout=subprocess.PIPE, text=True, env=self.env())
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait(), p.stdout.close()))
+        self.assertEqual(p.stdout.readline().strip(), "True")
+        return p
+
+    def test_twenty_at_once_read_once(self):
+        procs = [self.start("usage", "--json") for _ in range(20)]
+        outs = [p.communicate(timeout=120) for p in procs]
+        self.assertEqual([p.returncode for p in procs], [0] * 20, [e for _, e in outs])
+        reads = [e for _, e in outs if "Reading transcripts" in e]
+        self.assertEqual(len(reads), 1, [e for _, e in outs])
+        self.assertEqual(len({o for o, _ in outs}), 1)  # every one printed the same report
+        self.assertEqual(json.loads(outs[0][0])["pick"], next(json.loads(o) for o, _ in outs)["pick"])
+
+    def test_report_is_reused_for_a_minute_and_new_data_waits(self):
+        first = json.loads(self.start("usage", "--json").communicate(timeout=60)[0])
+        with open(self.transcript, "a") as fh:
+            fh.write(json.dumps(reply("s1", self.now - 60, "m4", out=200000)) + "\n")
+        p = self.start("usage", "--json")
+        out, err = p.communicate(timeout=60)
+        self.assertIn("Numbers read", err)
+        self.assertEqual(json.loads(out)["now"], first["now"])
+        p = self.start("usage", "--json", CLAUDE_MOVE_USAGE_FRESH="0.001")
+        out, err = p.communicate(timeout=60)
+        self.assertIn("Reading transcripts", err)
+        self.assertGreater(json.loads(out)["now"], first["now"])
+        # a person typing `usage` always gets new numbers
+        self.assertIn("Reading transcripts", self.start("usage").communicate(timeout=60)[1])
+
+    def test_busy_uses_the_last_report_without_waiting(self):
+        self.start("usage", "--json").communicate(timeout=60)
+        self.hold_lock()
+        t0 = time.time()
+        p = self.start("usage", CLAUDE_MOVE_USAGE_FRESH="0.001")
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 0, err)
+        self.assertLess(time.time() - t0, 20)
+        self.assertIn("Another claude-move is reading transcripts right now", err)
+        self.assertIn("switch to:", out)
+
+    def test_a_killed_holder_is_taken_over(self):
+        holder = self.hold_lock()
+        p = self.start("usage", "--json")  # no report yet: it waits for the lock
+        time.sleep(1.5)
+        self.assertIsNone(p.poll())
+        holder.kill()  # kill -9: the operating system lets go of the lock
+        holder.wait()
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 0, err)
+        self.assertIn("Reading transcripts", err)
+        self.assertTrue(json.loads(out)["rows"])
+
+    def test_waiting_ends_at_the_time_limit(self):
+        self.hold_lock()
+        t0 = time.time()
+        p = self.start("usage", "--json", CLAUDE_MOVE_USAGE_TIMEOUT="3")
+        out, err = p.communicate(timeout=60)
+        self.assertLess(time.time() - t0, 15)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("still reading transcripts", err)
+        self.assertEqual(out, "")
+
+    def test_hard_timeout_ends_a_stuck_run(self):
+        # what `usage` arms first: whatever the process is stuck in, it ends, with no child left behind
+        code = ("import sys, time, importlib.machinery as m; cm = m.SourceFileLoader('cm', sys.argv[1]).load_module(); "
+                "cm.arm_deadline(1); time.sleep(60); print('still here')")
+        t0 = time.time()
+        r = subprocess.run([sys.executable, "-c", code, str(TOOL)], capture_output=True, text=True, env=self.env(), timeout=60)
+        self.assertLess(time.time() - t0, 20)
+        self.assertEqual(r.returncode, 124 if WIN else -14, r.stderr)  # Windows: the timer's exit; else SIGALRM
+        self.assertNotIn("still here", r.stdout)
+
+    def test_scan_stops_at_its_deadline_and_goes_on_later(self):
+        cm = load_tool()
+        lines = [json.dumps(reply("s1", self.now - 7200 + i, f"q{i}")) + "\n" for i in range(4500)]
+        f = self.home / "big.jsonl"
+        f.write_text("".join(lines) + '{"half": ', encoding="utf-8")  # and a half-written last line
+        whole = cm.scan_file(f, 0)
+        self.assertEqual(len(whole[0]), 4500)
+        self.assertEqual(whole[2], sum(len(x.encode()) for x in lines))
+        clock = unittest.mock.Mock(side_effect=[0, 0, 10])  # read at lines 0 and 2000, out of time at 4000
+        with unittest.mock.patch.object(cm.time, "time", clock):
+            part = cm.scan_file(f, 0, deadline=5)
+        self.assertEqual(len(part[0]), 4000)
+        rest = cm.scan_file(f, part[2])
+        self.assertEqual(part[0] + rest[0], whole[0])
+        self.assertEqual(rest[2], whole[2])
+
+    def test_scan_out_of_time_saves_what_it_read(self):
+        cm = load_tool()
+        cache = self.home / "cache.json"
+        with unittest.mock.patch.object(cm, "CACHE", cache):
+            with self.assertRaises(cm.ScanUnfinished):
+                cm.scan([self.desk], deadline=time.time() - 1)
+            self.assertEqual(json.loads(cache.read_text(encoding="utf-8"))["v"], 4)  # written whole, never half
+            recs, hits = cm.scan([self.desk])
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(sorted(r[2] for r in recs), ["m1", "m2", "m3"])
+        self.assertEqual(list(self.home.glob("cache.json.*")), [])
+
+
 class Firstmate(unittest.TestCase):
     """quota-snapshot writes official numbers in quota-axi's cache format; fm-pin sets which login firstmate's crews use."""
     setUp, tearDown, run_tool = Usage.setUp, Usage.tearDown, Usage.run_tool
