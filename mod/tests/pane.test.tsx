@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 const PANE = {
   plugin: 'cmove',
@@ -122,5 +122,31 @@ test('moving shows what would change first, and quits the app only on the second
   await ui.press({ key: 'move-undo' })
   expect(ran.at(-2)).toEqual(['claude-move', 'undo', '--app'])
   expect(ran.at(-1)).toEqual(['claude-move', 'list', '--json'])
+  await ui.unmount()
+})
+
+test('a quota refresh still running is not started again', async ($, on) => {
+  const clock = mock.clock(on)
+  let usage = 0
+  on('process.run', async (_: unknown, e: { argv: string[] }) => {
+    if (e.argv[1] === 'usage') {
+      usage++
+      await clock.sleep(30000) // claude-move taking its time
+    }
+    const out = e.argv[1] === 'usage' ? JSON.stringify(USAGE) : e.argv[1] === 'list' ? JSON.stringify(DESK) : JSON.stringify(PS)
+    return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.status', () => ({ value: undefined }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  void ui.press({ key: 'refresh' })
+  await clock.settle()
+  void ui.press({ key: 'refresh' }) // pressed again while the first usage runs
+  await clock.settle()
+  expect(usage).toBe(1)
+  await clock.advance(30000) // the first one answers
+  void ui.press({ key: 'refresh' })
+  await clock.settle()
+  expect(usage).toBe(2) // and the next one runs again
+  await clock.advance(30000)
   await ui.unmount()
 })

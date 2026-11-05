@@ -135,6 +135,11 @@ Repeat with another folder name (`~/.claude-personal`, ...) per account, then ru
 `claude-move usage --html` also writes a panel page and opens it. It counts Claude Code on this Mac only;
 claude.ai chat and other devices are not included.
 
+Only one `usage` reads transcripts at a time on a computer. `usage --json` (what the mod in each Claude Code session
+calls) reuses the last report for a minute; while another run is reading, `usage` shows the numbers it read last
+instead of waiting. Transcripts are read a line at a time, and a run stops after 60 seconds: what it read by then is
+kept, and the next run goes on from there (`CLAUDE_MOVE_USAGE_TIMEOUT`, `CLAUDE_MOVE_USAGE_FRESH` change the two times).
+
 ### What the panel shows
 
 - Each account is a card with a ball of slowly flowing ink. Its color follows the account's tightest official
@@ -412,6 +417,8 @@ CLAUDE_CONFIG_DIR=~/.claude-work claude    # 进去后输入 /login，用这个�
 
 每个号换一个目录名（`~/.claude-personal` 等）照做一遍，然后运行 `claude-move usage --refresh --html`。
 只算这台 Mac 上的 Claude Code，网页聊天和别的设备上的用量算不进来。
+
+一台电脑上同一时间只有一个 `usage` 在读会话记录。`usage --json`（每个 Claude Code 会话里的 mod 调的就是它）一分钟内直接用上次的结果；别的 `usage` 正在读时，不等它，先显示上次读到的数。会话记录一行一行读，一次最多跑 60 秒：到时没读完的，读过的部分存下，下次接着读（时间可以用 `CLAUDE_MOVE_USAGE_TIMEOUT`、`CLAUDE_MOVE_USAGE_FRESH` 改）。
 
 **面板长什么样：**
 - 每个号一张卡片，上面一颗像墨水一样慢慢流动的球。颜色跟着这个号最紧的那项官方额度走：用得少是蓝，往上经过青、绿、黄，75% 是琥珀，90% 和 95%（发通知的地方）转红，用完或冷却中是深红；数字变的时候，颜色沿着这条渐变走过去。没有官方百分比的号是银灰色，颜色从不估算。大数字是那项额度的已用百分比，下面的小标签切换看哪一项；冷却中的号显示几点恢复。

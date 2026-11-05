@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+- `usage` no longer piles up when many Claude Code sessions ask at once (the mod asks from each one every five minutes; 47 runs at up to 1.4 GB each once filled a 16 GB Mac's swap). One run on the computer reads transcripts at a time, under a lock the system lets go of when the run ends, even when it is killed. `usage --json` reuses that run's report for 60 seconds (`CLAUDE_MOVE_USAGE_FRESH`), and while it is reading, the others print the last report at once instead of waiting.
+- `usage` stops itself after 60 seconds (`CLAUDE_MOVE_USAGE_TIMEOUT`). Transcripts are read until 15 seconds are left; what was read is saved and the next run goes on from there.
+- Transcripts are read a line at a time: a 535 MB transcript took 708 MB to read, now 40 MB. The cache is written whole, through a temp file, so a run reading it while another writes no longer finds it cut off and reads every transcript again from the start; it is also written a file's entry at a time. A run that reads uses about 400 MB instead of 600 MB.
+- The mod asks with a 60-second limit, and not again while its last ask is still running.
 ## 0.8.4
 - A trail of every copy: each desktop move, undo, terminal copy (`resume --to`, `run`, moving a group) and `import-cli` adds a line to `~/.config/claude-move/moves.jsonl` (when, which session, from, to, size, where what it replaced was saved).
 - `trail <session>`: a session's copies now (the newest marked), the desktop lists holding it, the copies claude-move made of it, and the older versions in backups.

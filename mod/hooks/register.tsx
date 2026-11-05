@@ -104,15 +104,24 @@ function quotaLine(q: Quota) {
     .join(' · ')
 }
 
+let quotaBusy = false // a refresh still running: the next one waits for the one after
+
 async function refreshQuota($: EngineInterface) {
-  const r = await cm($, ['usage', '--json'], 180000)
-  if (!r.ok) {
-    if (r.err) $.ui.status(`claude-move: ${r.err.split('\n').pop()}`)
-    return
+  if (quotaBusy) return
+  quotaBusy = true
+  try {
+    // claude-move reads at most once a minute on this computer and stops itself after 60 seconds
+    const r = await cm($, ['usage', '--json'], 60000)
+    if (!r.ok) {
+      if (r.err) $.ui.status(`claude-move: ${r.err.split('\n').pop()}`)
+      return
+    }
+    const q = JSON.parse(r.out) as Quota
+    await update($, quota, () => q)
+    $.ui.status(`${quotaLine(q)}${q.pick ? ` · ${t('pick')} ${q.pick}` : ''}`)
+  } finally {
+    quotaBusy = false
   }
-  const q = JSON.parse(r.out) as Quota
-  await update($, quota, () => q)
-  $.ui.status(`${quotaLine(q)}${q.pick ? ` · ${t('pick')} ${q.pick}` : ''}`)
 }
 
 async function refreshLive($: EngineInterface) {
