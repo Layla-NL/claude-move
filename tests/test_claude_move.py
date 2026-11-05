@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock
@@ -522,6 +523,57 @@ class UsageShared(unittest.TestCase):
         self.assertGreater(json.loads(out)["now"], first["now"])
         # a person typing `usage` always gets new numbers
         self.assertIn("Reading transcripts", self.start("usage").communicate(timeout=60)[1])
+
+    def limits(self, percent):
+        """What every Claude Code status line does (watch record): limits.json written again with a new time."""
+        p = self.home / ".config/claude-move/limits.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        rows = [{"kind": "weekly_all", "percent": percent, "resets_at": int(self.now + 86400)}]
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"acct-x": {"at": time.time(), "src": "statusline", "rows": rows}}), encoding="utf-8")
+        tmp.replace(p)
+
+    def test_status_lines_rewriting_limits_do_not_make_reads(self):
+        self.limits(40)
+        first = json.loads(self.start("usage", "--json").communicate(timeout=60)[0])
+        time.sleep(0.05)
+        self.limits(40)  # the same numbers, a newer file
+        out, err = self.start("usage", "--json").communicate(timeout=60)
+        self.assertIn("Numbers read", err)
+        self.assertEqual(json.loads(out)["now"], first["now"])
+        self.limits(41)  # a new official number: read again
+        self.assertIn("Reading transcripts", self.start("usage", "--json").communicate(timeout=60)[1])
+        # five at once with status lines writing all the while (as on 11-05: 3 of 5 read, 2 gave up): one read
+        (self.home / ".cache/claude-move/usage-report.json").unlink()
+        stop = threading.Event()
+
+        def status_lines():
+            while not stop.wait(0.02):
+                self.limits(41)
+        th = threading.Thread(target=status_lines)
+        th.start()
+        try:
+            procs = [self.start("usage", "--json") for _ in range(5)]
+            outs = [p.communicate(timeout=120) for p in procs]
+        finally:
+            stop.set()
+            th.join()
+        self.assertEqual([p.returncode for p in procs], [0] * 5, [e for _, e in outs])
+        self.assertEqual(len([e for _, e in outs if "Reading transcripts" in e]), 1, [e for _, e in outs])
+        self.assertEqual(len({o for o, _ in outs}), 1)
+
+    def test_a_report_written_while_waiting_is_used_at_the_time_limit(self):
+        self.start("usage", "--json").communicate(timeout=60)
+        rep = self.home / ".cache/claude-move/usage-report.json"
+        text = rep.read_text(encoding="utf-8")
+        rep.unlink()
+        self.hold_lock()
+        p = self.start("usage", "--json", CLAUDE_MOVE_USAGE_TIMEOUT="4")  # no report: it waits
+        time.sleep(1)
+        rep.write_text(text, encoding="utf-8")  # another run finished one meanwhile
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 0, err)
+        self.assertTrue(json.loads(out)["rows"])
 
     def test_busy_uses_the_last_report_without_waiting(self):
         self.start("usage", "--json").communicate(timeout=60)

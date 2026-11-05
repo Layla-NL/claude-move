@@ -1815,49 +1815,53 @@ class ReportBusy(Exception):
 
 def shared_report(extra_cfgs=(), deadline=None, must_read=False, fresh=None, on_read=None):
     """usage_report, read by one process at a time on this computer and shared through REPORT, so that many callers
-    (a Claude Code mod in each of dozens of sessions) cost one read. A report younger than `fresh` seconds, and newer
-    than the account names and official numbers it shows, is used as it is. While another process is reading, its
-    last report is used without waiting, unless `must_read` (after asking /usage) or there is none yet: then this
-    waits for the lock until `deadline` (10 minutes without one). Returns (report, how): how is "read", "reused",
-    "busy" (the other process is still reading) or "partial" (this read ran out of time; the last report is used)."""
+    (a Claude Code mod in each of dozens of sessions) cost one read. A report younger than `fresh` seconds, showing
+    the account names and official numbers there are now, is used as it is; so is one read after this call began,
+    which a call that waited for the lock gets. While another process is reading, its last report is used without
+    waiting, unless `must_read` (after asking /usage) or there is none yet: then this waits for the lock until
+    `deadline` (10 minutes without one). Returns (report, how): how is "read", "reused", "busy" (the other process
+    is still reading) or "partial" (this read ran out of time; the last report is used)."""
     fresh = USAGE_FRESH if fresh is None else fresh
     key = sorted(str(Path(os.path.expanduser(c))) for c in extra_cfgs)
+    asked = time.time()
+
+    def shown():
+        # what a report takes from outside the transcripts. By content, not file time: every Claude Code status
+        # line rewrites limits.json with a new time, often with the same numbers
+        lim = load(LIMITS)
+        lim = {a: v.get("rows") for a, v in lim.items() if isinstance(v, dict)} if isinstance(lim, dict) else None
+        return json.dumps([load(NAMES), lim], sort_keys=True, ensure_ascii=False)
 
     def last():
         d = load(REPORT)
         r = d.get("rep") if isinstance(d, dict) and d.get("key") == key else None
-        return r if isinstance(r, dict) and isinstance(r.get("now"), (int, float)) else None
+        return (r, d.get("shown")) if isinstance(r, dict) and isinstance(r.get("now"), (int, float)) else (None, None)
 
-    def usable(r):
-        changed = 0
-        for p in (NAMES, LIMITS):
-            try:
-                changed = max(changed, p.stat().st_mtime)
-            except OSError:
-                pass
-        return bool(r) and 0 <= time.time() - r["now"] < fresh and r["now"] >= changed
+    def usable(r, sh):
+        return bool(r) and 0 <= time.time() - r["now"] < fresh and sh == shown()
 
-    old = last()
-    if not must_read and usable(old):
+    old, sh = last()
+    if not must_read and usable(old, sh):
         return old, "reused"
     wait = 0 if old and not must_read else max(0.0, (deadline or time.time() + 600) - time.time())
     with machine_lock(USAGE_LOCK, wait) as lock:
+        new, sh = last()  # the process that held the lock may have just written one
         if not lock.got:
-            if old:
-                return old, "busy"
+            if new or old:
+                return new or old, "busy"
             raise ReportBusy()
-        new = last()  # the process that held the lock may have just written one
-        if usable(new):
+        if new and (new["now"] >= asked or not must_read and usable(new, sh)):
             return new, "reused"
         if on_read:
             on_read()
+        took = shown()
         try:
             rep_ = usage_report(extra_cfgs, deadline=deadline)
         except ScanUnfinished:
             if new or old:
                 return new or old, "partial"
             raise
-        text = json.dumps({"key": key, "rep": rep_}, ensure_ascii=False, separators=(",", ":"))
+        text = json.dumps({"key": key, "shown": took, "rep": rep_}, ensure_ascii=False, separators=(",", ":"))
         write_atomic(REPORT, text)
         return json.loads(text)["rep"], "read"  # the same values a reused report has
 
