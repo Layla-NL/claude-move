@@ -570,7 +570,7 @@ class UsageShared(unittest.TestCase):
         cm = load_tool()
         lines = [json.dumps(reply("s1", self.now - 7200 + i, f"q{i}")) + "\n" for i in range(4500)]
         f = self.home / "big.jsonl"
-        f.write_text("".join(lines) + '{"half": ', encoding="utf-8")  # and a half-written last line
+        f.write_bytes(("".join(lines) + '{"half": ').encode("utf-8"))  # and a half-written last line; bytes, so Windows keeps \n
         whole = cm.scan_file(f, 0)
         self.assertEqual(len(whole[0]), 4500)
         self.assertEqual(whole[2], sum(len(x.encode()) for x in lines))
